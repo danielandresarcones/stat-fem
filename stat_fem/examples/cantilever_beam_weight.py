@@ -1,12 +1,12 @@
 import numpy as np
-import stat_fem
 import ufl
+import stat_fem
 from stat_fem.covariance_functions import sqexp
 import matplotlib.pyplot as plt
 from firedrake import *
 
 # Set up base FEM, which solves Poisson's equation on a square mesh
-
+makeplot = False
 nx = 101
 # Scaled variable
 length = 1.0
@@ -63,12 +63,13 @@ displaced_coordinates = interpolate(SpatialCoordinate(mesh) + uh, V)
 displacements = interpolate(uh, V)
 displaced_mesh = Mesh(displaced_coordinates)
 
-fig, axes = plt.subplots()
-# triplot(displaced_mesh, axes=axes)
-surf = tripcolor(displacements, axes=axes)
-axes.set_aspect("equal");
-fig.colorbar(surf)
-plt.show()
+if makeplot:
+    fig, axes = plt.subplots()
+    # triplot(displaced_mesh, axes=axes)
+    surf = tripcolor(displacements, axes=axes)
+    axes.set_aspect("equal");
+    fig.colorbar(surf)
+    plt.show()
 
 # Create some fake data that is systematically different from the FEM solution.
 # note that all parameters are on a log scale, so we take the true values
@@ -105,30 +106,33 @@ y = (-gamma * rho_g / (8 * (mu_f*(3*lambda_f+2*mu_f)/(lambda_f+mu_f)) * 0.01 )*(
      np.random.normal(scale = sigma_y, size = ndata))
 
 # visualize the prior FEM solution and the synthetic data
-
-fig, axes = plt.subplots()
-plt.tripcolor(mesh.coordinates.vector().dat.data[:,0], mesh.coordinates.vector().dat.data[:,1],
-                uh.vector().dat.data[:,1], axes = axes)
-plt.colorbar()
-plt.scatter(x_data[:,0], x_data[:,1], c = y, cmap="Greys_r")
-plt.colorbar()
-axes.set_aspect = "equal"
-plt.title("Prior FEM solution and data")
-plt.show()
+if makeplot:
+    fig, axes = plt.subplots()
+    plt.tripcolor(mesh.coordinates.vector().dat.data[:,0], mesh.coordinates.vector().dat.data[:,1],
+                    uh.vector().dat.data[:,1], axes = axes)
+    plt.colorbar()
+    plt.scatter(x_data[:,0], x_data[:,1], c = y, cmap="Greys_r")
+    plt.colorbar()
+    axes.set_aspect = "equal"
+    plt.title("Prior FEM solution and data")
+    plt.show()
 
 # Begin stat-fem solution
 
 # Compute and assemble forcing covariance matrix using known correlated errors in forcing
 
 G = stat_fem.ForcingCovariance(V, [0.0, sigma_f], [0.0, l_f])
+# G = stat_fem.ForcingCovariance(V.sub(1), sigma_f, l_f)
 G.assemble()
-# G_y = stat_fem.ForcingCovariance(V.sub(1), sigma_f, l_f)
 
 
 # combine data into an observational data object using known locations, observations,
 # and known statistical errors
 
-obs_data = stat_fem.ObsData(x_data, y, sigma_y)
+
+obs_data = []
+obs_data.append(stat_fem.ObsData(x_data, y, sigma_y))
+obs_data.append(stat_fem.ObsData(x_data, np.zeros_like(y), np.zeros_like(sigma_y)))
 
 # Use MLE (MAP with uninformative prior information) to estimate discrepancy parameters
 # Should get a good estimate of these values for this example problem (if not, you

@@ -108,7 +108,7 @@ class ForcingCovariance(object):
 
         self.G = None
         
-    def _integrate_basis_functions(self):
+    def _integrate_basis_functions(self, function_space):
         """
         Integrate the basis functions for computing the forcing covariance
 
@@ -123,7 +123,7 @@ class ForcingCovariance(object):
         :rtype: ndarray
         """
 
-        v = TestFunction(self.function_space)
+        v = TestFunction(function_space)
 
         return np.array(assemble(Constant(1.) * v * dx).vector().gather())
 
@@ -141,30 +141,53 @@ class ForcingCovariance(object):
                   represented by those matrix entries.
         :rtype: tuple
         """
+        if isinstance(self.sigma, list):
+            G_dict = [dict()]*len(self.sigma)
+            nnz = [0.0]*len(self.sigma)
+            for dim in range(len(self.sigma)):
+                int_basis = self._integrate_basis_functions(self.function_space.sub(dim))
+                mesh = self.function_space.sub(dim).ufl_domain()
+                W = VectorFunctionSpace(mesh, self.function_space.sub(dim).ufl_element())
+                X = interpolate(mesh.coordinates, W)
+                meshvals = X.vector().gather()
+                if X.dat.data.ndim == 2:
+                    meshvals = np.reshape(meshvals, (-1, X.dat.data.shape[1]))
+                else:
+                    meshvals = np.reshape(meshvals, (-1, 1))
+                assert meshvals.shape[0] == self.nx/len(self.sigma), "error in gathering mesh coordinates"
 
-        G_dict = {}
-        nnz = 0
-
-        int_basis = self._integrate_basis_functions()
-        mesh = self.function_space.ufl_domain()
-        W = VectorFunctionSpace(mesh, self.function_space.ufl_element())
-        X = interpolate(mesh.coordinates, W)
-        meshvals = X.vector().gather()
-        if X.dat.data.ndim == 2:
-            meshvals = np.reshape(meshvals, (-1, X.dat.data.shape[1]))
+                for i in range(self.local_startind, self.local_endind):
+                    row = (int_basis[i]*int_basis*
+                        self.cov(meshvals[i], meshvals, self.sigma[dim], self.l[dim]))[0]
+                    row[i] += self.regularization
+                    above_cutoff = (row/row[i] > self.cutoff)
+                    G_dict[dim][i] = (row[above_cutoff], np.arange(0, self.nx/len(self.sigma), dtype=PETSc.IntType)[above_cutoff])
+                    new_nnz = int(np.sum(above_cutoff))
+                    if new_nnz > nnz[dim]:
+                        nnz[dim] = new_nnz
         else:
-            meshvals = np.reshape(meshvals, (-1, 1))
-        assert meshvals.shape[0] == self.nx, "error in gathering mesh coordinates"
+            G_dict = {}
+            nnz = 0
+            int_basis = self._integrate_basis_functions()
+            mesh = self.function_space.ufl_domain()
+            W = VectorFunctionSpace(mesh, self.function_space.ufl_element())
+            X = interpolate(mesh.coordinates, W)
+            meshvals = X.vector().gather()
+            if X.dat.data.ndim == 2:
+                meshvals = np.reshape(meshvals, (-1, X.dat.data.shape[1]))
+            else:
+                meshvals = np.reshape(meshvals, (-1, 1))
+            assert meshvals.shape[0] == self.nx, "error in gathering mesh coordinates"
 
-        for i in range(self.local_startind, self.local_endind):
-            row = (int_basis[i]*int_basis*
-                   self.cov(meshvals[i], meshvals, self.sigma, self.l))[0]
-            row[i] += self.regularization
-            above_cutoff = (row/row[i] > self.cutoff)
-            G_dict[i] = (row[above_cutoff], np.arange(0, self.nx, dtype=PETSc.IntType)[above_cutoff])
-            new_nnz = int(np.sum(above_cutoff))
-            if new_nnz > nnz:
-                nnz = new_nnz
+            for i in range(self.local_startind, self.local_endind):
+                row = (int_basis[i]*int_basis*
+                    self.cov(meshvals[i], meshvals, self.sigma, self.l))[0]
+                row[i] += self.regularization
+                above_cutoff = (row/row[i] > self.cutoff)
+                G_dict[i] = (row[above_cutoff], np.arange(0, self.nx, dtype=PETSc.IntType)[above_cutoff])
+                new_nnz = int(np.sum(above_cutoff))
+                if new_nnz > nnz:
+                    nnz = new_nnz
 
         return G_dict, nnz
 
@@ -182,17 +205,33 @@ class ForcingCovariance(object):
 
         G_dict, nnz = self._compute_G_vals()
 
-        self.G = PETSc.Mat().create(comm=self.comm)
-        self.G.setType('aij')
-        self.G.setSizes(((self.nx_local, -1), (self.nx_local, -1)))
-        self.G.setPreallocationNNZ(nnz)
-        self.G.setFromOptions()
-        self.G.setUp()
+        if isinstance(nnz, list):
+            self.G=[None]*len(nnz)
+            for i in range(len(nnz)):
+                self.G[i] = PETSc.Mat().create(comm=self.comm)
+                self.G[i].setType('aij')
+                self.G[i].setSizes(((self.nx_local, -1), (self.nx_local, -1)))
+                self.G[i].setPreallocationNNZ(nnz)
+                self.G[i].setFromOptions()
+                self.G[i].setUp()
 
-        for key, val in G_dict.items():
-            self.G.setValues(np.array(key, dtype=PETSc.IntType), val[1], val[0])
+                for key, val in G_dict[i].items():
+                    self.G[i].setValues(np.array(key, dtype=PETSc.IntType), val[1], val[0])
 
-        self.G.assemble()
+                self.G[i].assemble()
+
+        else:
+            self.G = PETSc.Mat().create(comm=self.comm)
+            self.G.setType('aij')
+            self.G.setSizes(((self.nx_local, -1), (self.nx_local, -1)))
+            self.G.setPreallocationNNZ(nnz)
+            self.G.setFromOptions()
+            self.G.setUp()
+
+            for key, val in G_dict.items():
+                self.G.setValues(np.array(key, dtype=PETSc.IntType), val[1], val[0])
+
+            self.G.assemble()
 
         self.is_assembled = True
 
