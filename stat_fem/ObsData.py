@@ -51,13 +51,15 @@ class ObsData(object):
 
         assert coords.ndim == 2, "coords must be a 1D or 2D array"
 
-        self.n_obs = coords.shape[0]
+        # self.n_obs = coords.shape[0]
         self.n_dim = coords.shape[1]
         self.coords = np.copy(coords)
 
         data = np.array(data, dtype=np.float64)
-        assert data.shape == (self.n_obs,), "data must be a 1D array with the same length as coords"
+        assert data.shape[0] == coords.shape[0], "data must have the same length as coords"
+        # assert data.shape[0] == self.n_obs, "data must have the same length as coords"
         self.data = np.copy(data)
+        self.n_obs = self.data.size
 
         unc = np.array(unc, dtype=np.float64)
         unc = np.nan_to_num(unc)
@@ -154,7 +156,7 @@ class ObsData(object):
         sigma = params[0]
         l = params[1]
 
-        return sqexp(self.coords, self.coords, sigma, l)
+        return np.repeat(np.repeat(sqexp(self.coords, self.coords, sigma, l), 2, axis = 0), 2, axis = 1)
 
     def calc_K_plus_sigma(self, params):
         """
@@ -211,4 +213,4 @@ class ObsData(object):
         sigma = params[0]
         l = params[1]
 
-        return sqexp_deriv(self.coords, self.coords, sigma, l)
+        return np.repeat(np.repeat(sqexp_deriv(self.coords, self.coords, sigma, l), 2, axis = 1), 2, axis = 2)

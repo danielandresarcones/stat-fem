@@ -274,7 +274,7 @@ class LinearSolver(object):
                 except LinAlgError:
                     raise LinAlgError("Error attempting to compute the Cholesky factorization " +
                                       "of the model discrepancy")
-                tmp_dataspace_1 = cho_solve(LK, self.data.get_data())
+                tmp_dataspace_1 = cho_solve(LK, self.data.get_data().reshape((-1,)))
             else:
                 tmp_dataspace_1 = np.zeros(0)
 
@@ -358,7 +358,7 @@ class LinearSolver(object):
 
             # compute posterior mean
 
-            muy = rho*np.dot(self.Cu, cho_solve(LK, self.data.get_data())) + self.mu
+            muy = rho*np.dot(self.Cu, cho_solve(LK, self.data.get_data().reshape((-1,)))) + self.mu
             muy_tmp = rho**2*np.dot(self.Cu, cho_solve(LC, muy))
             muy = muy - muy_tmp
 
@@ -604,10 +604,10 @@ class LinearSolver(object):
             except LinAlgError:
                 raise LinAlgError("Error attempting to factorize the covariance matrix " +
                                   "in model_loglikelihood")
-            invKCudata = cho_solve(L, self.data.get_data() - rho*self.mu)
+            invKCudata = cho_solve(L, self.data.get_data().reshape((-1,)) - rho*self.mu)
             log_posterior = 0.5*(self.data.get_n_obs()*np.log(2.*np.pi) +
                                  2.*np.sum(np.log(np.diag(L[0]))) +
-                                 np.dot(self.data.get_data() - rho*self.mu, invKCudata))
+                                 np.dot(self.data.get_data().reshape((-1,)) - rho*self.mu, invKCudata))
             for i in range(3):
                 if not self.priors[i] is None:
                     log_posterior -= self.priors[i].logp(self.params[i])
@@ -663,7 +663,7 @@ class LinearSolver(object):
             except LinAlgError:
                 raise LinAlgError("Error attempting to factorize the covariance matrix " +
                                   "in model_loglikelihood")
-            invKCudata = cho_solve(L, self.data.get_data() - rho*self.mu)
+            invKCudata = cho_solve(L, self.data.get_data().reshape((-1,)) - rho*self.mu)
 
             K_deriv = self.data.calc_K_deriv(self.params[1:])
 

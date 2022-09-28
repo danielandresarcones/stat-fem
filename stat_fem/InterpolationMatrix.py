@@ -1,4 +1,5 @@
 import numpy as np
+import ufl
 from firedrake import Function
 from firedrake.petsc import PETSc
 from firedrake.functionspace import VectorFunctionSpace
@@ -64,7 +65,7 @@ class InterpolationMatrix(object):
         self.function_space = function_space
         self.comm = function_space.comm
 
-        self.n_data = coords.shape[0]
+        self.n_data = coords.shape[0]*2
         assert (coords.shape[1] == self.function_space.mesh().cell_dimension()
                 ), "shape of coordinates does not match mesh dimension"
 
@@ -76,7 +77,8 @@ class InterpolationMatrix(object):
         self.dataspace_distrib.setSizes((-1, self.n_data))
         self.dataspace_distrib.setFromOptions()
 
-        self.n_data_local = self.dataspace_distrib.getSizes()[0]
+        # self.n_data_local = self.dataspace_distrib.getSizes()[0]
+        self.n_data_local = coords.shape[0]
 
         # all data computations are done on root process, so create gather method to
         # facilitate this data transfer
@@ -91,7 +93,8 @@ class InterpolationMatrix(object):
         nnz = len(self.function_space.cell_node_list[0])
 
         self.interp = PETSc.Mat().create(comm=self.comm)
-        self.interp.setSizes(((self.n_mesh_local, -1), (self.n_data_local, -1)))
+        self.interp.setSizes(((self.n_mesh, -1), (self.n_data, -1)))
+        # self.interp.setSizes(((self.n_mesh_local, -1), (self.n_data_local, -1)))
         self.interp.setPreallocationNNZ(nnz)
         self.interp.setFromOptions()
         self.interp.setUp()
@@ -112,14 +115,17 @@ class InterpolationMatrix(object):
             return
 
         mesh = self.function_space.ufl_domain()
-        W = VectorFunctionSpace(mesh, self.function_space.ufl_element())
+        if not isinstance(self.function_space.ufl_element(), ufl.VectorElement):
+            W = VectorFunctionSpace(mesh, self.function_space.ufl_element())
+        else:
+            W = self.function_space
         X = interpolate(mesh.coordinates, W)
         meshvals_local = np.array(X.dat.data_with_halos)
         imin, imax = self.interp.getOwnershipRange()
 
         # loop over all data points
 
-        for i in range(self.n_data):
+        for i in range(self.n_data_local):
             cell = self.function_space.mesh().locate_cell(self.coords[i])
             if not cell is None:
                 nodes = self.function_space.cell_node_list[cell]
@@ -127,7 +133,8 @@ class InterpolationMatrix(object):
                 interp_coords = interpolate_cell(self.coords[i], points)
                 for (node, val) in zip(nodes, interp_coords):
                     if node < self.n_mesh_local:
-                        self.interp.setValue(imin + node, i, val)
+                        for j in range(2):
+                            self.interp.setValue(imin + 2*node + j, 2*i + j, val)
 
         self.interp.assemble()
 

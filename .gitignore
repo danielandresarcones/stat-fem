@@ -105,3 +105,4 @@ venv.bak/
 
 # version file
 stat_fem/version.py
+stat_fem/test.txt

@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from firedrake import *
 
 # Set up base FEM, which solves Poisson's equation on a square mesh
-makeplot = False
+makeplot = True
 nx = 101
 # Scaled variable
 length = 1.0
@@ -121,18 +121,17 @@ if makeplot:
 
 # Compute and assemble forcing covariance matrix using known correlated errors in forcing
 
-G = stat_fem.ForcingCovariance(V, [0.0, sigma_f], [0.0, l_f])
+G = stat_fem.ForcingCovariance(V, [sigma_f, sigma_f], [l_f, l_f])
 # G = stat_fem.ForcingCovariance(V.sub(1), sigma_f, l_f)
 G.assemble()
 
 
 # combine data into an observational data object using known locations, observations,
 # and known statistical errors
-
-
-obs_data = []
-obs_data.append(stat_fem.ObsData(x_data, y, sigma_y))
-obs_data.append(stat_fem.ObsData(x_data, np.zeros_like(y), np.zeros_like(sigma_y)))
+y_data_obs = np.array([[0.0, y_data_i] for y_data_i in y]).reshape(-1,x_data.shape[1])
+obs_data = stat_fem.ObsData(x_data, y_data_obs, sigma_y)
+# obs_data.append(stat_fem.ObsData(x_data, np.zeros_like(y), np.zeros_like(sigma_y)))
+# obs_data.append(stat_fem.ObsData(x_data, y, sigma_y))
 
 # Use MLE (MAP with uninformative prior information) to estimate discrepancy parameters
 # Should get a good estimate of these values for this example problem (if not, you
@@ -166,12 +165,13 @@ muy2, Cuy = ls.solve_posterior_covariance()
 
 # visualize posterior FEM solution and uncertainty
 
-
+plot_Cuy = [np.diag(Cuy)[i] for i in range(len(np.diag(Cuy))) if i % 2 != 0]
+plot_muy2 = [np.diag(muy2)[i] for i in range(len(np.diag(muy2))) if i % 2 != 0]
 plt.figure()
 plt.tripcolor(mesh.coordinates.vector().dat.data[:,0], mesh.coordinates.vector().dat.data[:,1],
-                muy.vector().dat.data)
+                muy.vector().dat.data[:,1])
 plt.colorbar()
-plt.scatter(x_data[:,0], x_data[:,1], c = np.diag(Cuy), cmap="Greys_r")
+plt.scatter(x_data[:,0], x_data[:,1], c = plot_Cuy, cmap="Greys_r")
 plt.colorbar()
 plt.title("Posterior FEM solution and uncertainty")
 plt.show()
