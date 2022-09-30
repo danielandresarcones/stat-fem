@@ -64,11 +64,11 @@ displacements = interpolate(uh, V)
 displaced_mesh = Mesh(displaced_coordinates)
 
 if makeplot:
-    fig, axes = plt.subplots()
+    fig_1, axes = plt.subplots()
     # triplot(displaced_mesh, axes=axes)
     surf = tripcolor(displacements, axes=axes)
     axes.set_aspect("equal");
-    fig.colorbar(surf)
+    fig_1.colorbar(surf)
     plt.show()
 
 # Create some fake data that is systematically different from the FEM solution.
@@ -107,13 +107,13 @@ y = (-gamma * rho_g / (8 * (mu_f*(3*lambda_f+2*mu_f)/(lambda_f+mu_f)) * 0.01 )*(
 
 # visualize the prior FEM solution and the synthetic data
 if makeplot:
-    fig, axes = plt.subplots()
+    fig_2, axes_2 = plt.subplots()
     plt.tripcolor(mesh.coordinates.vector().dat.data[:,0], mesh.coordinates.vector().dat.data[:,1],
-                    uh.vector().dat.data[:,1], axes = axes)
+                    uh.vector().dat.data[:,1], axes = axes_2)
     plt.colorbar()
     plt.scatter(x_data[:,0], x_data[:,1], c = y, cmap="Greys_r")
     plt.colorbar()
-    axes.set_aspect = "equal"
+    axes_2.set_aspect = "equal"
     plt.title("Prior FEM solution and data")
     plt.show()
 
@@ -138,7 +138,7 @@ obs_data = stat_fem.ObsData(x_data, y_data_obs, sigma_y)
 # were unlucky with random sampling!)
 A = assemble(a, bcs = bc)
 b = assemble(L)
-ls = stat_fem.estimate_params_MAP(A, b, G, obs_data)
+ls = stat_fem.estimate_params_MAP(A, b, G, obs_data, solver_parameters=options, near_nullspace=nullmodes)
 
 print("MLE parameter estimates:")
 print(ls.params)
@@ -167,7 +167,8 @@ muy2, Cuy = ls.solve_posterior_covariance()
 
 plot_Cuy = [np.diag(Cuy)[i] for i in range(len(np.diag(Cuy))) if i % 2 != 0]
 plot_muy2 = [np.diag(muy2)[i] for i in range(len(np.diag(muy2))) if i % 2 != 0]
-plt.figure()
+
+fig_3 = plt.figure()
 plt.tripcolor(mesh.coordinates.vector().dat.data[:,0], mesh.coordinates.vector().dat.data[:,1],
                 muy.vector().dat.data[:,1])
 plt.colorbar()
