@@ -47,9 +47,9 @@ def solve_forcing_covariance(G, ls, rhs):
     ls.A.bcs = None
     
     rhs_working = rhs.copy()
-    x = Function(G.function_space).vector()
+    x = Function(rhs_working.function_space()).vector()
     ls.solve(x, rhs_working)
-    G.mult(x, rhs_working)
+    G.mult(x, rhs_working, reduce = True)
     ls.solve(x, rhs_working)
 
     # turn BCs back on

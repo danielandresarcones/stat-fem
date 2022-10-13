@@ -76,7 +76,7 @@ if makeplot:
 # and take the logarithm
 
 # forcing covariance parameters (taken to be known)
-sigma_f = np.log(2.e-2)
+sigma_f = np.log(2.e-1)
 l_f = np.log(0.354)
 
 # model discrepancy parameters (need to be estimated)
@@ -86,7 +86,7 @@ l_eta = np.log(0.5)
 
 # data statistical errors (taken to be known)
 sigma_y = 2.e-3
-datagrid = 6
+datagrid = 2
 ndata = datagrid**2
 
 # create fake data on a grid
@@ -101,7 +101,7 @@ for i in range(datagrid):
 # fake data is the true FEM solution, scaled by the mismatch factor rho, with
 # correlated errors added due to model/data discrepancy and uncorrelated measurement
 # errors both added to the data
-y = (-gamma * rho_g / (8 * (mu_f*(3*lambda_f+2*mu_f)/(lambda_f+mu_f)) * 0.01 )*(x_data[:,0])**2*(3*length**2+2*length*(length-x_data[:,0])+(length-x_data[:,0])**2) +
+y = (-gamma * rho_g *np.exp(rho)/ (8 * (mu_f*(3*lambda_f+2*mu_f)/(lambda_f+mu_f)) * 0.01 )*(x_data[:,0])**2*(3*length**2+2*length*(length-x_data[:,0])+(length-x_data[:,0])**2) +
      np.random.multivariate_normal(mean = np.zeros(ndata), cov = sqexp(x_data, x_data, sigma_eta, l_eta)) +
      np.random.normal(scale = sigma_y, size = ndata))
 
@@ -121,15 +121,22 @@ if makeplot:
 
 # Compute and assemble forcing covariance matrix using known correlated errors in forcing
 
-G = stat_fem.ForcingCovariance(V, [sigma_f, sigma_f], [l_f, l_f])
-# G = stat_fem.ForcingCovariance(V.sub(1), sigma_f, l_f)
-G.assemble()
-
+# G = stat_fem.ForcingCovariance(V, [sigma_f, sigma_f], [l_f, l_f])
+G = stat_fem.ForcingCovariance(V, [0, sigma_f], [-1e2, l_f])
+# G = stat_fem.ForcingCovariance(V, [sigma_f], [l_f])
+# G.assemble()
 
 # combine data into an observational data object using known locations, observations,
 # and known statistical errors
 y_data_obs = np.array([[0.0, y_data_i] for y_data_i in y]).reshape(-1,x_data.shape[1])
-obs_data = stat_fem.ObsData(x_data, y_data_obs, sigma_y)
+# y_data_obs = y
+
+# adapt sigma for  0 values
+# sigma_obs = sigma_y
+sigma_obs = y_data_obs
+sigma_obs[:,1] = sigma_y*np.ones_like(sigma_obs[:,1])
+sigma_obs = sigma_obs.ravel()
+obs_data = stat_fem.ObsData(x_data, y_data_obs, sigma_obs)
 # obs_data.append(stat_fem.ObsData(x_data, np.zeros_like(y), np.zeros_like(sigma_y)))
 # obs_data.append(stat_fem.ObsData(x_data, y, sigma_y))
 
@@ -138,7 +145,7 @@ obs_data = stat_fem.ObsData(x_data, y_data_obs, sigma_y)
 # were unlucky with random sampling!)
 A = assemble(a, bcs = bc)
 b = assemble(L)
-ls = stat_fem.estimate_params_MAP(A, b, G, obs_data, solver_parameters=options, near_nullspace=nullmodes)
+ls = stat_fem.estimate_params_MAP(A, b, G, obs_data, solver_parameters=options, near_nullspace=nullmodes, output_index_dimensions = [0,1])
 
 print("MLE parameter estimates:")
 print(ls.params)

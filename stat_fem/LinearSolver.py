@@ -63,7 +63,7 @@ class LinearSolver(object):
     def __init__(self, A, b, G, data, *, priors=[None, None, None], ensemble_comm=COMM_SELF,
                  P=None, solver_parameters=None, nullspace=None,
                  transpose_nullspace=None, near_nullspace=None,
-                 options_prefix=None):
+                 options_prefix=None, out_dim = []):
         r"""
         Create a new object encapsulating all solves on the same FEM model
 
@@ -144,8 +144,9 @@ class LinearSolver(object):
         self.ensemble_comm = ensemble_comm
         self.priors = list(priors)
         self.params = None
+        self.out_dim = out_dim
 
-        self.im = InterpolationMatrix(G.function_space, data.get_coords())
+        self.im = InterpolationMatrix(G.function_space, data.get_coords(), out_dim=out_dim)
 
         self.x = None
         self.mu = None

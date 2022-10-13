@@ -255,7 +255,7 @@ class ForcingCovariance(object):
 
         self.G.destroy()
 
-    def mult(self, x, y):
+    def mult(self, x, y, reduce: False):
         """
         Perform matrix multiplication with firedrake vector
 
@@ -285,6 +285,8 @@ class ForcingCovariance(object):
 
         with x.dat.vec_ro as xtmp:
             with y.dat.vec as ytmp:
+                if reduce:
+                    ratio = xtmp.size / self.nx
                 self.G.mult(xtmp, ytmp)
 
     def get_nx(self):

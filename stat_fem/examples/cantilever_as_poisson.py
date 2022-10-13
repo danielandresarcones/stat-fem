@@ -1,9 +1,9 @@
 import numpy as np
-from firedrake import UnitSquareMesh, FunctionSpace, TrialFunction, TestFunction
-from firedrake import SpatialCoordinate, dx, pi, sin, dot, grad, DirichletBC
-from firedrake import assemble, Function, solve
+import ufl
 import stat_fem
 from stat_fem.covariance_functions import sqexp
+import matplotlib.pyplot as plt
+from firedrake import *
 try:
     import matplotlib.pyplot as plt
     makeplots = True
@@ -12,22 +12,38 @@ except ImportError:
 
 # Set up base FEM, which solves Poisson's equation on a square mesh
 
+makeplots = True
 nx = 101
+# Scaled variable
+length = 1.0
+width = 0.2
+mu_f = 1
+rho_g = 1
+delta = width/length
+gamma = 0.4*delta**2
+beta = 1.25
+lambda_f = beta
+g = gamma
 
-mesh = UnitSquareMesh(nx - 1, nx - 1)
+
+mesh = RectangleMesh(nx-1, nx-1, length, width)
+
 V = FunctionSpace(mesh, "CG", 1)
+rho_g_f = Constant(rho_g)
+g_f = Constant(g)
 
 u = TrialFunction(V)
 v = TestFunction(V)
 
 f = Function(V)
 x = SpatialCoordinate(mesh)
-f.interpolate((8*pi*pi)*sin(x[0]*pi*2)*sin(x[1]*pi*2))
-
-a = (dot(grad(v), grad(u))) * dx
+f = Constant(-rho_g_f*g_f)
+mu = Constant(mu_f)
+lambda_ = Constant(lambda_f)
+a = (inner((2*mu+lambda_)*grad(u), 0.01*grad(v))) * dx
 L = f * v * dx
 
-bc = DirichletBC(V, 0., "on_boundary")
+bc = DirichletBC(V, 0., 1)
 
 A = assemble(a, bcs = bc)
 
@@ -35,51 +51,60 @@ b = assemble(L)
 
 u = Function(V)
 
-solve(A, u, b)
+options={"ksp_type": "cg", 
+        "ksp_max_it": 100, 
+        "pc_type": "gamg",
+        "mat_type": "aij",
+        "ksp_converged_reason": None}
+
+solve(A, u, b, solver_parameters = options)
 
 # Create some fake data that is systematically different from the FEM solution.
 # note that all parameters are on a log scale, so we take the true values
 # and take the logarithm
 
 # forcing covariance parameters (taken to be known)
-sigma_f = np.log(2.e-2)
+sigma_f = np.log(2.e-3)
 l_f = np.log(0.354)
 
 # model discrepancy parameters (need to be estimated)
-rho = np.log(0.7)
-sigma_eta = np.log(1.e-2)
+rho = np.log(0.9)
+sigma_eta = np.log(1.e-3)
 l_eta = np.log(0.5)
 
 # data statistical errors (taken to be known)
-sigma_y = 2.e-3
-datagrid = 6
-ndata = datagrid**2
+sigma_y = 2.e-4
+datagrid_x = 10
+datagrid_y = 1
+ndata = datagrid_x*datagrid_y
 
 # create fake data on a grid
 x_data = np.zeros((ndata, 2))
 count = 0
-for i in range(datagrid):
-    for j in range(datagrid):
-        x_data[count, 0] = float(i+1)/float(datagrid + 1)
-        x_data[count, 1] = float(j+1)/float(datagrid + 1)
+for i in range(datagrid_x):
+    for j in range(datagrid_y):
+        x_data[count, 0] = float(i+1)/float(datagrid_x + 1) * length
+        x_data[count, 1] = float(j+1)/float(datagrid_y + 1) * width
         count += 1
 
 # fake data is the true FEM solution, scaled by the mismatch factor rho, with
 # correlated errors added due to model/data discrepancy and uncorrelated measurement
 # errors both added to the data
-y = (np.exp(rho)*np.sin(2.*np.pi*x_data[:,0])*np.sin(2.*np.pi*x_data[:,1]) +
+# y = (np.exp(rho)*np.sin(2.*np.pi*x_data[:,0])*np.sin(2.*np.pi*x_data[:,1]) +
+#      np.random.multivariate_normal(mean = np.zeros(ndata), cov = sqexp(x_data, x_data, sigma_eta, l_eta)) +
+#      np.random.normal(scale = sigma_y, size = ndata))
+y = (-gamma * rho_g * np.exp(rho) / (8 * (mu_f*(3*lambda_f+2*mu_f)/(lambda_f+mu_f)) * 0.01 )*(x_data[:,0])**2*(3*length**2+2*length*(length-x_data[:,0])+(length-x_data[:,0])**2) +
      np.random.multivariate_normal(mean = np.zeros(ndata), cov = sqexp(x_data, x_data, sigma_eta, l_eta)) +
      np.random.normal(scale = sigma_y, size = ndata))
-
 # visualize the prior FEM solution and the synthetic data
 
 if makeplots:
     plt.figure()
     plt.tripcolor(mesh.coordinates.vector().dat.data[:,0], mesh.coordinates.vector().dat.data[:,1],
                   u.vector().dat.data)
-    plt.colorbar()
+    plt.colorbar(label="Displacement prior",pad=0.1)
     plt.scatter(x_data[:,0], x_data[:,1], c = y, cmap="Greys_r")
-    plt.colorbar()
+    plt.colorbar(label="Displacement data")
     plt.title("Prior FEM solution and data")
 
 # Begin stat-fem solution
@@ -129,8 +154,8 @@ if makeplots:
     plt.figure()
     plt.tripcolor(mesh.coordinates.vector().dat.data[:,0], mesh.coordinates.vector().dat.data[:,1],
                   muy.vector().dat.data)
-    plt.colorbar()
+    plt.colorbar(label="Displacement posterior",pad=0.1)
     plt.scatter(x_data[:,0], x_data[:,1], c = np.diag(Cuy), cmap="Greys_r")
-    plt.colorbar()
+    plt.colorbar(label="Covariance $C_{u|y}$ at y")
     plt.title("Posterior FEM solution and uncertainty")
     plt.show()

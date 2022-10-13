@@ -55,7 +55,7 @@ class InterpolationMatrix(object):
     :ivar is_assembled: Boolean indicating if ``interp`` has been assembled
     :type is_assembled: bool
     """
-    def __init__(self, function_space, coords):
+    def __init__(self, function_space, coords, out_dim):
         "create and assemble interpolation matrix"
 
         if not isinstance(function_space, WithGeometry):
@@ -65,7 +65,7 @@ class InterpolationMatrix(object):
         self.function_space = function_space
         self.comm = function_space.comm
 
-        self.n_data = coords.shape[0]*2
+        self.n_data = coords.shape[0]*len(out_dim)
         assert (coords.shape[1] == self.function_space.mesh().cell_dimension()
                 ), "shape of coordinates does not match mesh dimension"
 
@@ -133,8 +133,8 @@ class InterpolationMatrix(object):
                 interp_coords = interpolate_cell(self.coords[i], points)
                 for (node, val) in zip(nodes, interp_coords):
                     if node < self.n_mesh_local:
-                        for j in range(2):
-                            self.interp.setValue(imin + 2*node + j, 2*i + j, val)
+                        for j in range(self.n_mesh_local.denominator):
+                            self.interp.setValue(imin + self.n_mesh_local.denominator*node + j, self.n_mesh_local.denominator*i + j, val)
 
         self.interp.assemble()
 

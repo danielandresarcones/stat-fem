@@ -1,10 +1,11 @@
+from typing import Type
 import numpy as np
 from scipy.optimize import minimize
 from firedrake import COMM_SELF, COMM_WORLD
 from .LinearSolver import LinearSolver
 from mpi4py import MPI
 
-def estimate_params_MAP(A, b, G, data, priors=[None, None, None], start=None, ensemble_comm=COMM_SELF, **kwargs):
+def estimate_params_MAP(A, b, G, data, priors=[None, None, None], start=None, ensemble_comm=COMM_SELF, output_index_dimensions = [], **kwargs):
     """
     Estimate model hyperparameters using MAP estimation
 
@@ -74,9 +75,15 @@ def estimate_params_MAP(A, b, G, data, priors=[None, None, None], start=None, en
             ls_kwargs[kw] = kwargs[kw]
         else:
             minimize_kwargs[kw] = kwargs[kw]
-    
+    out_dim = output_index_dimensions
+    if len(out_dim) == 0:
+        try:
+            out_dim = [i for i in range(len(data.data[0]))]
+        except TypeError:
+            out_dim = [0]
+
     ls = LinearSolver(A, b, G, data, priors=priors, ensemble_comm=ensemble_comm,
-                      **ls_kwargs)
+                      **ls_kwargs, out_dim = out_dim)
 
     ls.solve_prior()
 

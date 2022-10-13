@@ -156,7 +156,7 @@ class ObsData(object):
         sigma = params[0]
         l = params[1]
 
-        return np.repeat(np.repeat(sqexp(self.coords, self.coords, sigma, l), 2, axis = 0), 2, axis = 1)
+        return np.repeat(np.repeat(sqexp(self.coords, self.coords, sigma, l), int(self.n_obs/self.data.shape[0]), axis = 0), int(self.n_obs/self.data.shape[0]), axis = 1)
 
     def calc_K_plus_sigma(self, params):
         """
@@ -213,4 +213,4 @@ class ObsData(object):
         sigma = params[0]
         l = params[1]
 
-        return np.repeat(np.repeat(sqexp_deriv(self.coords, self.coords, sigma, l), 2, axis = 1), 2, axis = 2)
+        return np.repeat(np.repeat(sqexp_deriv(self.coords, self.coords, sigma, l), int(self.n_obs/self.data.shape[0]), axis = 1), int(self.n_obs/self.data.shape[0]), axis = 2)
