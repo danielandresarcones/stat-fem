@@ -63,7 +63,7 @@ class LinearSolver(object):
     def __init__(self, A, b, G, data, *, priors=[None, None, None], ensemble_comm=COMM_SELF,
                  P=None, solver_parameters=None, nullspace=None,
                  transpose_nullspace=None, near_nullspace=None,
-                 options_prefix=None, out_dim = []):
+                 options_prefix=None, out_dim = [], stabilise = False):
         r"""
         Create a new object encapsulating all solves on the same FEM model
 
@@ -145,6 +145,7 @@ class LinearSolver(object):
         self.priors = list(priors)
         self.params = None
         self.out_dim = out_dim
+        self.stabilise = stabilise
 
         self.im = InterpolationMatrix(G.function_space, data.get_coords(), out_dim=out_dim)
 
@@ -209,6 +210,10 @@ class LinearSolver(object):
         # form interpolated prior covariance across all ensemble processes
 
         self.Cu = interp_covariance_to_data(self.im, self.G, self.solver, self.im, self.ensemble_comm)
+
+        if self.stabilise:
+            sigma_stabilisation = 0.001*sum([sigma_i**2 for sigma_i in self.G.sigma])
+            self.Cu = self.Cu + sigma_stabilisation * np.identity(self.Cu.shape[0])
 
         # solve base FEM (prior mean) and interpolate to data space on root
 

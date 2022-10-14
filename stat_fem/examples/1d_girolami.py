@@ -1,3 +1,4 @@
+from turtle import color
 import numpy as np
 import ufl
 import stat_fem
@@ -60,20 +61,20 @@ sigma_f = 0.3
 l_f = 0.25
 
 # model discrepancy parameters (need to be estimated)
-rho = np.log(0.80)
+rho = np.log(1.0)
 sigma_eta = np.log(0.0225/2)
-l_eta = np.log(2.0)
+l_eta = np.log(0.5)
 
 # data statistical errors (taken to be known)
-sigma_y = 2.5e-5
+sigma_y = sqrt(2.5e-5)
 datagrid_x = nx
 ndata = datagrid_x
 
 # create fake data on a grid
-x_data = np.zeros((ndata-2,1))
+x_data = np.zeros((ndata,1))
 count = 0
-for i in range(ndata-2):
-    x_data[count,0] = float(i+1)/float(datagrid_x-1)
+for i in range(ndata):
+    x_data[count,0] = float(i)/float(datagrid_x-1)
     count += 1
 
 # fake data is the true FEM solution, scaled by the mismatch factor rho, with
@@ -82,9 +83,9 @@ for i in range(ndata-2):
 # y = (np.exp(rho)*np.sin(2.*np.pi*x_data[:,0])*np.sin(2.*np.pi*x_data[:,1]) +
 #      np.random.multivariate_normal(mean = np.zeros(ndata), cov = sqexp(x_data, x_data, sigma_eta, l_eta)) +
 #      np.random.normal(scale = sigma_y, size = ndata))
-y = (np.exp(rho)*(0.2*np.sin(np.pi*x_data[:,0])+0.02*np.sin(7*np.pi*x_data[:,0])) +
-     np.random.multivariate_normal(mean = np.zeros(ndata-2), cov = sqexp(x_data, x_data, sigma_eta, l_eta)) +
-     np.random.normal(scale = sigma_y, size = ndata-2))
+z_mean = np.exp(rho)*(0.2*np.sin(np.pi*x_data[:,0])+0.02*np.sin(7*np.pi*x_data[:,0]))
+z = (z_mean + np.random.multivariate_normal(mean = np.zeros(ndata), cov = sqexp(x_data, x_data, sigma_eta, l_eta)))
+y = (z + np.random.normal(scale = sigma_y, size = ndata))
 # visualize the prior FEM solution and the synthetic data
 
 
@@ -104,19 +105,34 @@ obs_data = stat_fem.ObsData(x_data, y, sigma_y)
 # Should get a good estimate of these values for this example problem (if not, you
 # were unlucky with random sampling!)
 
-ls = stat_fem.estimate_params_MAP(A, b, G, obs_data)
+# ls = stat_fem.estimate_params_MAP(A, b, G, obs_data)
+ls, samples = stat_fem.estimate_params_MCMC(A, b, G, obs_data, stabilise = True)
 
 print("MLE parameter estimates:")
 print(ls.params)
 print("Actual input parameters:")
-print(np.array([rho, sigma_eta, l_eta]))
+true_values = np.array([rho, sigma_eta, l_eta])
+print(true_values)
+
+if makeplots:
+    figure, axes = plt.subplots(3)
+    names = [r"$\rho$",r"$\sigma_d$",r"$l_d$"]
+    p_names = [r"$p(\rho)$",r"$p(\sigma_d$)",r"p($l_d$)"]
+    for i in range(3):
+        axes[i].hist(np.exp(samples[:, i]), 100, color='k', histtype="step")
+        axes[i].set(xlabel = names[i], ylabel = p_names[i])
+        axes[i].axvline(x=np.exp(ls.params[i]), c='b',linestyle = '-', label = "Estimate")
+        axes[i].axvline(x=np.exp(true_values[i]), c='r',linestyle = '--', label = "True")
+        axes[i].legend()
+    axes[2].set(xlim = (-1,1))
+
 
 # Estimation function returns a re-usable LinearSolver object, which we can use to compute the
 # posterior FEM solution conditioned on the data
 
 # solve for posterior FEM solution conditioned on data
 mu, Cu = ls.solve_prior()
-mu_z, Cu_z = ls.solve_prior_generating()
+mu_y, Cu_y = ls.solve_prior_generating()
 muy = Function(V)
 
 # plot priors 
@@ -124,8 +140,10 @@ if makeplots:
     plt.figure()
     plt.plot(x_data[:,0],mu,'o-',markersize = 2,label = "u")
     plt.fill_between(x_data[:,0],mu+1.96*np.diag(Cu), mu-1.96*np.diag(Cu), label = "u 95 confidence",alpha = 0.5)
-    plt.plot(x_data[:,0],mu_z,'o-',markersize = 2,label = "z")
-    plt.fill_between(x_data[:,0],mu_z+1.96*np.diag(Cu_z), mu_z-1.96*np.diag(Cu_z), label = "z 95 confidence",alpha = 0.5)
+    # plt.plot(x_data[:,0],mu_y,'o-',markersize = 2,label = "y from FEM (z+noise)")
+    # plt.fill_between(x_data[:,0],mu_y+1.96*np.diag(Cu_y), mu_y-1.96*np.diag(Cu_y), label = "y from FEM (z+noise) 95 confidence",alpha = 0.5)
+    plt.plot(x_data,z_mean, '+-', label = "z")
+    plt.fill_between(x_data[:,0],z_mean+1.96*np.exp(sigma_eta),z_mean-1.96*np.exp(sigma_eta), label = "z 95 confidence", alpha = 0.5)
     plt.plot(x_data,y, '+', label = "data")
     plt.xlabel("x [m]")
     plt.ylabel("y")
@@ -141,7 +159,7 @@ ls.solve_posterior(muy, scale_mean=True)
 # covariance can only be computed for a select number of locations as covariance is a dense matrix
 # function returns the mean/covariance as numpy arrays, not Firedrake functions
 
-muy2, Cuy = ls.solve_posterior_covariance()
+muy2, Cuy = ls.solve_posterior_covariance(scale_mean = True)
 mu_z2, Cu_z2 = ls.solve_posterior_generating()
 
 # if makeplots:
@@ -158,10 +176,10 @@ mu_z2, Cu_z2 = ls.solve_posterior_generating()
 
 if makeplots:
     plt.figure()
-    plt.plot(mesh.coordinates.vector().dat.data[:],muy.vector().dat.data,'o-',markersize = 0, label = "u posterior")
-    plt.fill_between(x_data[:,0],muy.vector().dat.data[1:-1]+1.96*np.diag(Cuy), muy.vector().dat.data[1:-1]-1.96*np.diag(Cuy), label = "u 95 confidence", alpha = 0.5)
-    plt.plot(x_data[:,0],mu_z2,'o-',markersize = 2,label = "z posterior")
-    plt.fill_between(x_data[:,0],mu_z2+1.96*np.diag(Cu_z2), mu_z2-1.96*np.diag(Cu_z2), label = "z 95 confidence", alpha = 0.5)
+    plt.plot(x_data[:,0],muy2,'o-',markersize = 0, label = "u posterior")
+    plt.fill_between(x_data[:,0],muy2+1.96*np.diag(Cuy), muy2-1.96*np.diag(Cuy), label = "u 95 confidence", alpha = 0.5)
+    plt.plot(x_data[:,0],mu_z2,'o-',markersize = 2,label = "y from FEM (z+noise) posterior")
+    plt.fill_between(x_data[:,0],mu_z2+1.96*np.diag(Cu_z2), mu_z2-1.96*np.diag(Cu_z2), label = "y from FEM (z+noise) 95 confidence", alpha = 0.5)
     plt.plot(x_data,y, '+', label = "data")
     plt.title("Posterior solutions")
     plt.xlabel("x [m]")
