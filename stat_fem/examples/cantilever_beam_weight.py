@@ -63,6 +63,11 @@ displaced_coordinates = interpolate(SpatialCoordinate(mesh) + uh, V)
 displacements = interpolate(uh, V)
 displaced_mesh = Mesh(displaced_coordinates)
 
+fileResults = File("output.pvd")
+disp = Function(V, name='Displacement')
+disp.assign(uh)
+fileResults.write(displacements)
+
 if makeplot:
     fig_1, axes = plt.subplots()
     # triplot(displaced_mesh, axes=axes)
