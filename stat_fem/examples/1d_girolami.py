@@ -38,15 +38,6 @@ b = assemble(L)
 
 u = Function(V)
 
-# options={"ksp_type": "cg", 
-#         "ksp_max_it": 100, 
-#         "pc_type": "gamg",
-#         "mat_type": "aij",
-#         "ksp_converged_reason": None}
-
-# V.dofmap().set(nullspace_basis[0], 1.0)
-
-# solve(A, u, b, solver_parameters = options)
 solve(A, u, b)
 
 
@@ -55,8 +46,6 @@ solve(A, u, b)
 # and take the logarithm
 
 # forcing covariance parameters (taken to be known)
-# sigma_f = np.log(0.15)
-# l_f = np.log(0.5)
 sigma_f = 0.3
 l_f = 0.25
 
@@ -80,9 +69,6 @@ for i in range(ndata):
 # fake data is the true FEM solution, scaled by the mismatch factor rho, with
 # correlated errors added due to model/data discrepancy and uncorrelated measurement
 # errors both added to the data
-# y = (np.exp(rho)*np.sin(2.*np.pi*x_data[:,0])*np.sin(2.*np.pi*x_data[:,1]) +
-#      np.random.multivariate_normal(mean = np.zeros(ndata), cov = sqexp(x_data, x_data, sigma_eta, l_eta)) +
-#      np.random.normal(scale = sigma_y, size = ndata))
 z_mean = np.exp(rho)*(0.2*np.sin(np.pi*x_data[:,0])+0.02*np.sin(7*np.pi*x_data[:,0]))
 z_cov = sqexp(x_data, x_data, sigma_eta, l_eta)
 z = (z_mean + np.random.multivariate_normal(mean = np.zeros(ndata), cov = z_cov))
@@ -141,10 +127,7 @@ if makeplots:
     plt.figure()
     plt.plot(x_data[:,0],mu,'o-',markersize = 2,label = "u")
     plt.fill_between(x_data[:,0],mu+1.96*np.diag(Cu), mu-1.96*np.diag(Cu), label = "u 95 confidence",alpha = 0.5)
-    # plt.plot(x_data[:,0],mu_f,'o-',markersize = 2,label = "y from inferred w and prior u")
-    # plt.fill_between(x_data[:,0],mu_f+1.96*np.diag(Cu_f), mu_f-1.96*np.diag(Cu_f), label = "y from inferred w and prior u 95 confidence",alpha = 0.5)
     plt.plot(x_data,z_mean, '+-', label = "True z")
-    # plt.fill_between(x_data[:,0],z_mean+1.96*np.exp(sigma_eta),z_mean-1.96*np.exp(sigma_eta), label = "z 95 confidence", alpha = 0.5)
     plt.fill_between(x_data[:,0],z_mean+1.96*np.sqrt(np.diag(z_cov)),z_mean-1.96*np.sqrt(np.diag(z_cov)), label = "True z 95 confidence", alpha = 0.5)
     plt.plot(x_data,y, '+', label = "data")
     plt.xlabel("x [m]")
@@ -163,16 +146,6 @@ ls.solve_posterior(muy, scale_mean=True)
 
 muy2, Cuy = ls.solve_posterior_covariance(scale_mean = True)
 mu_z2, Cu_z2 = ls.solve_posterior_real()
-
-# if makeplots:
-#     plt.figure()
-#     plt.plot(x_data[:,0],muy2,'o-',markersize = 0,label = "u")
-#     plt.fill_between(x_data[:,0],muy2+1.96*np.diag(Cuy), muy2-1.96*np.diag(Cuy), alpha = 0.5)
-#     plt.plot(x_data[:,0],mu_z2,'o-',markersize = 2,label = "z")
-#     plt.fill_between(x_data[:,0],mu_z2+1.96*np.diag(Cu_z2), mu_z2-1.96*np.diag(Cu_z2), alpha = 0.5)
-#     plt.plot(x_data,y, '+-', label = "data")
-#     plt.legend()
-#     plt.title("Posterior u, Posterior z and data")
 
 # visualize posterior FEM solution and uncertainty
 
