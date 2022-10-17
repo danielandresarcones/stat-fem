@@ -23,7 +23,7 @@ V = FunctionSpace(mesh, "CG", 1)
 u = TrialFunction(V)
 v = TestFunction(V)
 
-f = Constant(np.pi**2/5)
+f = Constant(np.pi**2/5.0)
 x = SpatialCoordinate(mesh)
 
 a = dot(grad(v), grad(u)) * dx
@@ -55,8 +55,8 @@ solve(A, u, b)
 # and take the logarithm
 
 # forcing covariance parameters (taken to be known)
-# sigma_f = np.log(0.3)
-# l_f = np.log(0.25)
+# sigma_f = np.log(0.15)
+# l_f = np.log(0.5)
 sigma_f = 0.3
 l_f = 0.25
 
@@ -84,7 +84,8 @@ for i in range(ndata):
 #      np.random.multivariate_normal(mean = np.zeros(ndata), cov = sqexp(x_data, x_data, sigma_eta, l_eta)) +
 #      np.random.normal(scale = sigma_y, size = ndata))
 z_mean = np.exp(rho)*(0.2*np.sin(np.pi*x_data[:,0])+0.02*np.sin(7*np.pi*x_data[:,0]))
-z = (z_mean + np.random.multivariate_normal(mean = np.zeros(ndata), cov = sqexp(x_data, x_data, sigma_eta, l_eta)))
+z_cov = sqexp(x_data, x_data, sigma_eta, l_eta)
+z = (z_mean + np.random.multivariate_normal(mean = np.zeros(ndata), cov = z_cov))
 y = (z + np.random.normal(scale = sigma_y, size = ndata))
 # visualize the prior FEM solution and the synthetic data
 
@@ -108,7 +109,7 @@ obs_data = stat_fem.ObsData(x_data, y, sigma_y)
 # ls = stat_fem.estimate_params_MAP(A, b, G, obs_data)
 ls, samples = stat_fem.estimate_params_MCMC(A, b, G, obs_data, stabilise = True)
 
-print("MLE parameter estimates:")
+print("Parameter estimates:")
 print(ls.params)
 print("Actual input parameters:")
 true_values = np.array([rho, sigma_eta, l_eta])
@@ -132,7 +133,7 @@ if makeplots:
 
 # solve for posterior FEM solution conditioned on data
 mu, Cu = ls.solve_prior()
-mu_y, Cu_y = ls.solve_prior_generating()
+mu_f, Cu_f = ls.solve_prior_generating()
 muy = Function(V)
 
 # plot priors 
@@ -140,10 +141,11 @@ if makeplots:
     plt.figure()
     plt.plot(x_data[:,0],mu,'o-',markersize = 2,label = "u")
     plt.fill_between(x_data[:,0],mu+1.96*np.diag(Cu), mu-1.96*np.diag(Cu), label = "u 95 confidence",alpha = 0.5)
-    # plt.plot(x_data[:,0],mu_y,'o-',markersize = 2,label = "y from FEM (z+noise)")
-    # plt.fill_between(x_data[:,0],mu_y+1.96*np.diag(Cu_y), mu_y-1.96*np.diag(Cu_y), label = "y from FEM (z+noise) 95 confidence",alpha = 0.5)
-    plt.plot(x_data,z_mean, '+-', label = "z")
-    plt.fill_between(x_data[:,0],z_mean+1.96*np.exp(sigma_eta),z_mean-1.96*np.exp(sigma_eta), label = "z 95 confidence", alpha = 0.5)
+    # plt.plot(x_data[:,0],mu_f,'o-',markersize = 2,label = "y from inferred w and prior u")
+    # plt.fill_between(x_data[:,0],mu_f+1.96*np.diag(Cu_f), mu_f-1.96*np.diag(Cu_f), label = "y from inferred w and prior u 95 confidence",alpha = 0.5)
+    plt.plot(x_data,z_mean, '+-', label = "True z")
+    # plt.fill_between(x_data[:,0],z_mean+1.96*np.exp(sigma_eta),z_mean-1.96*np.exp(sigma_eta), label = "z 95 confidence", alpha = 0.5)
+    plt.fill_between(x_data[:,0],z_mean+1.96*np.sqrt(np.diag(z_cov)),z_mean-1.96*np.sqrt(np.diag(z_cov)), label = "True z 95 confidence", alpha = 0.5)
     plt.plot(x_data,y, '+', label = "data")
     plt.xlabel("x [m]")
     plt.ylabel("y")
@@ -160,7 +162,7 @@ ls.solve_posterior(muy, scale_mean=True)
 # function returns the mean/covariance as numpy arrays, not Firedrake functions
 
 muy2, Cuy = ls.solve_posterior_covariance(scale_mean = True)
-mu_z2, Cu_z2 = ls.solve_posterior_generating()
+mu_z2, Cu_z2 = ls.solve_posterior_real()
 
 # if makeplots:
 #     plt.figure()
@@ -177,9 +179,9 @@ mu_z2, Cu_z2 = ls.solve_posterior_generating()
 if makeplots:
     plt.figure()
     plt.plot(x_data[:,0],muy2,'o-',markersize = 0, label = "u posterior")
-    plt.fill_between(x_data[:,0],muy2+1.96*np.diag(Cuy), muy2-1.96*np.diag(Cuy), label = "u 95 confidence", alpha = 0.5)
+    plt.fill_between(x_data[:,0],muy2+1.96*np.sqrt(np.diag(Cuy)), muy2-1.96*np.sqrt(np.diag(Cuy)), label = "u 95 confidence", alpha = 0.5)
     plt.plot(x_data[:,0],mu_z2,'o-',markersize = 2,label = "y from FEM (z+noise) posterior")
-    plt.fill_between(x_data[:,0],mu_z2+1.96*np.diag(Cu_z2), mu_z2-1.96*np.diag(Cu_z2), label = "y from FEM (z+noise) 95 confidence", alpha = 0.5)
+    plt.fill_between(x_data[:,0],mu_z2+1.96*np.sqrt(np.diag(Cu_z2)), mu_z2-1.96*np.sqrt(np.diag(Cu_z2)), label = "y from FEM (z+noise) 95 confidence", alpha = 0.5)
     plt.plot(x_data,y, '+', label = "data")
     plt.title("Posterior solutions")
     plt.xlabel("x [m]")

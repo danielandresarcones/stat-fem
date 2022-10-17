@@ -245,6 +245,53 @@ def solve_posterior_generating(A, b, G, data, params, ensemble_comm=COMM_SELF, *
     ls.set_params(params)
     return ls.solve_posterior_generating()
 
+def solve_posterior_real(A, b, G, data, params, ensemble_comm=COMM_SELF, **kwargs):
+    """
+    Solve for the FEM posterior of the generating process and covariance
+
+    Standalone function to solve for the posterior generating process
+    of the FEM solution interpolated to the sensor locations and the
+    covariance. Solution is returned as a pair of numpy arrays holding
+    the solution in a 1D array and the covariance matrix in a 2D array.
+    If the solves are parallelized, the non-root process arrays will
+    contain empty arrays. This is just a wrapper to the
+    ``solve_posterior_generating`` method of the stat-fem ``LinearSolver``
+    class.
+
+    In addition to the parameters specified here, additional keyword
+    arguments to control the PETSc solver options can be passed here
+    and will be used when creating  the ``LinearSolver`` class.
+    Please see the documentation for the ``LinearSolver`` class for
+    more details.
+
+    :param A: Assembled Firedrake Matrix for the FEM
+    :type A: Firedrake Matrix
+    :param b: Assembled RHS vector, must be a Firedrake Vector
+    :type b: Firedrake Vector
+    :param G: Forcing covariance matrix
+    :type G: ForcingCovariance
+    :param data: ObsData object holding sensor data locations
+    :type data: ObsData
+    :param params: Model discrepancy parameters to use in computing the
+                   solution. Must by a 1D numpy array of length 3. Note
+                   that these parameters are specified on a logarithmic
+                   scale to enforce positivity.
+    :type params: ndarray
+    :param ensemble_comm: MPI communicator to use for parallelizing the
+                          covariance solves. Optional, default is to
+                          do the solves serially.
+    :type ensemble_comm: MPI Communicator
+    :param **kwargs: Additional keyword arguments for the PETSc solver.
+    :returns: Mean and covariance matrix of the posterior of the generating
+              process as numpy arrays. Mean is a 1D array and covariance
+              is a 2D array.
+    :rtype: tuple of 2 ndarrays
+    """
+
+    ls = LinearSolver(A, b, G, data, ensemble_comm=ensemble_comm, **kwargs)
+    ls.set_params(params)
+    return ls.solve_posterior_real()
+
 def predict_mean(A, b, G, data, params, coords, ensemble_comm=COMM_SELF, scale_mean=True, **kwargs):
     """
     Solve for the predicted mean FEM posterior values at new locations

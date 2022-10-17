@@ -3,11 +3,12 @@ import numpy as np
 import emcee
 from scipy.optimize import minimize
 from firedrake import COMM_SELF, COMM_WORLD
+from sympy import true
 from .LinearSolver import LinearSolver
 from mpi4py import MPI
 import matplotlib.pyplot as plt
 
-def estimate_params_MAP(A, b, G, data, priors=[None, None, None], start=None, ensemble_comm=COMM_SELF, output_index_dimensions = [], **kwargs):
+def estimate_params_MAP(A, b, G, data, priors=[None, None, None], start=None, ensemble_comm=COMM_SELF, output_index_dimensions = [], stabilise = False, **kwargs):
     """
     Estimate model hyperparameters using MAP estimation
 
@@ -85,7 +86,7 @@ def estimate_params_MAP(A, b, G, data, priors=[None, None, None], start=None, en
             out_dim = [0]
 
     ls = LinearSolver(A, b, G, data, priors=priors, ensemble_comm=ensemble_comm,
-                      **ls_kwargs, out_dim = out_dim)
+                      **ls_kwargs, out_dim = out_dim, stabilise = stabilise)
 
     ls.solve_prior()
 
@@ -224,9 +225,10 @@ def estimate_params_MCMC(A, b, G, data, priors=[None, None, None], start=None, e
             return -ls.logposterior(params)
         return -np.inf
 
+    print(f"Burn in MCMC with {n_walkers} walkers and {n_burn_in} samples.")
     sampler = emcee.EnsembleSampler(n_walkers, 3, loglikelihood)
     # sampler = emcee.EnsembleSampler(n_walkers, 3, lambda x: -ls.logposterior(x))
-    state = sampler.run_mcmc(p0,n_burn_in)
+    state = sampler.run_mcmc(p0,n_burn_in, progress = True)
     samples_burn = sampler.get_chain(flat = True)
 
     if makeplot:
@@ -244,7 +246,9 @@ def estimate_params_MCMC(A, b, G, data, priors=[None, None, None], start=None, e
         plt.gca().set_yticks([]);
     sampler.reset()
 
-    sampler.run_mcmc(state, n_samples)
+    print(f"Solving MCMC with {n_walkers} walkers and {n_samples} samples.")
+    sampler.run_mcmc(state, n_samples, progress = True)
+    print(f"Acceptance fraction: {np.mean(sampler.acceptance_fraction)}")
 
     # broadcast result to all processes
 

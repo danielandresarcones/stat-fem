@@ -39,11 +39,11 @@ v = TestFunction(V)
 
 f = Function(V)
 x = SpatialCoordinate(mesh)
-f = Constant(-rho_g_f*g_f)
+# f = Constant(-rho_g_f*g_f)
 f = Constant(-M/(E*I))
 mu = Constant(mu_f)
 lambda_ = Constant(lambda_f)
-a = dot(grad(u), grad(v)) * dx
+a = dot(grad(v), grad(u)) * dx
 L = f * v * dx
 
 bc = DirichletBC(V, 0., 1)
@@ -71,8 +71,8 @@ solve(A, u, b)
 # and take the logarithm
 
 # forcing covariance parameters (taken to be known)
-sigma_f = np.log(2.e-3)
-l_f = np.log(0.354)
+sigma_f = 0.3
+l_f = 0.25
 
 # model discrepancy parameters (need to be estimated)
 rho = np.log(0.9)
@@ -87,8 +87,8 @@ ndata = datagrid_x
 # create fake data on a grid
 x_data = np.zeros((ndata,1))
 count = 0
-for i in range(datagrid_x):
-    x_data[count,0] = float(i+1)/float(datagrid_x + 1) * length
+for i in range(ndata):
+    x_data[count,0] = float(i)/float(datagrid_x-1)
     count += 1
 
 # fake data is the true FEM solution, scaled by the mismatch factor rho, with
@@ -97,22 +97,13 @@ for i in range(datagrid_x):
 # y = (np.exp(rho)*np.sin(2.*np.pi*x_data[:,0])*np.sin(2.*np.pi*x_data[:,1]) +
 #      np.random.multivariate_normal(mean = np.zeros(ndata), cov = sqexp(x_data, x_data, sigma_eta, l_eta)) +
 #      np.random.normal(scale = sigma_y, size = ndata))
-y = (-gamma * rho_g * np.exp(rho) / (8 * (mu_f*(3*lambda_f+2*mu_f)/(lambda_f+mu_f)) * 0.01 )*(x_data[:,0])**2*(3*length**2+2*length*(length-x_data[:,0])+(length-x_data[:,0])**2) +
-     np.random.multivariate_normal(mean = np.zeros(ndata), cov = sqexp(x_data, x_data, sigma_eta, l_eta)) +
+z_mean = -gamma * rho_g * np.exp(rho) / (8 * (mu_f*(3*lambda_f+2*mu_f)/(lambda_f+mu_f)) * 0.01 )*(x_data[:,0])**2*(3*length**2+2*length*(length-x_data[:,0])+(length-x_data[:,0])**2)
+z_cov = np.random.multivariate_normal(mean = np.zeros(ndata), cov = sqexp(x_data, x_data, sigma_eta, l_eta))
+y = (z_mean +
+     z_cov +
      np.random.normal(scale = sigma_y, size = ndata))
 # visualize the prior FEM solution and the synthetic data
 
-if makeplots:
-    plt.figure()
-    # plt.tripcolor(mesh.coordinates.vector().dat.data[:],
-    #               u.vector().dat.data)
-    plt.plot(mesh.coordinates.vector().dat.data[:],u.vector().dat.data,'o',label = "FEM")
-    # plt.colorbar(label="Displacement prior",pad=0.1)
-    # plt.scatter(x_data,  c = y, cmap="Greys_r")
-    # plt.colorbar(label="Displacement data")
-    plt.plot(x_data,y, '+-', label = "data")
-    plt.legend()
-    plt.title("Prior FEM solution and data")
 
 # Begin stat-fem solution
 
@@ -130,7 +121,24 @@ obs_data = stat_fem.ObsData(x_data, y, sigma_y)
 # Should get a good estimate of these values for this example problem (if not, you
 # were unlucky with random sampling!)
 
-ls = stat_fem.estimate_params_MAP(A, b, G, obs_data)
+ls = stat_fem.estimate_params_MAP(A, b, G, obs_data, stabilise = True)
+mu, Cu = ls.solve_prior()
+
+if makeplots:
+    plt.figure()
+    plt.plot(x_data[:,0],mu,'o-',markersize = 2,label = "u")
+    plt.fill_between(x_data[:,0],mu+1.96*np.diag(Cu), mu-1.96*np.diag(Cu), label = "u 95 confidence",alpha = 0.5)
+    # plt.plot(x_data[:,0],mu_y,'o-',markersize = 2,label = "y from FEM (z+noise)")
+    # plt.fill_between(x_data[:,0],mu_y+1.96*np.diag(Cu_y), mu_y-1.96*np.diag(Cu_y), label = "y from FEM (z+noise) 95 confidence",alpha = 0.5)
+    plt.plot(x_data,z_mean, '+-', label = "z")
+    plt.fill_between(x_data[:,0],z_mean+1.96*np.exp(sigma_eta),z_mean-1.96*np.exp(sigma_eta), label = "z 95 confidence", alpha = 0.5)
+    # plt.fill_between(x_data[:,0],z_mean+1.96*np.sqrt(np.diag(z_cov)),z_mean-1.96*np.sqrt(np.diag(z_cov)), label = "z 95 confidence", alpha = 0.5)
+    plt.plot(x_data,y, '+', label = "data")
+    plt.xlabel("x [m]")
+    plt.ylabel("y")
+    plt.legend()
+    plt.title("Prior solutions")
+
 
 print("MLE parameter estimates:")
 print(ls.params)
@@ -153,16 +161,20 @@ ls.solve_posterior(muy, scale_mean=True)
 # covariance can only be computed for a select number of locations as covariance is a dense matrix
 # function returns the mean/covariance as numpy arrays, not Firedrake functions
 
-muy2, Cuy = ls.solve_posterior_covariance()
+muy2, Cuy = ls.solve_posterior_covariance(scale_mean = True)
+mu_z2, Cu_z2 = ls.solve_posterior_generating()
 
 # visualize posterior FEM solution and uncertainty
 
 if makeplots:
     plt.figure()
-    plt.tripcolor(mesh.coordinates.vector().dat.data[:,0], mesh.coordinates.vector().dat.data[:,1],
-                  muy.vector().dat.data)
-    plt.colorbar(label="Displacement posterior",pad=0.1)
-    plt.scatter(x_data, c = np.diag(Cuy), cmap="Greys_r")
-    plt.colorbar(label="Covariance $C_{u|y}$ at y")
-    plt.title("Posterior FEM solution and uncertainty")
+    plt.plot(x_data[:,0],muy2,'o-',markersize = 0, label = "u posterior")
+    plt.fill_between(x_data[:,0],muy2+1.96*np.sqrt(np.diag(Cuy)), muy2-1.96*np.sqrt(np.diag(Cuy)), label = "u 95 confidence", alpha = 0.5)
+    plt.plot(x_data[:,0],mu_z2,'o-',markersize = 2,label = "y from FEM (z+noise) posterior")
+    plt.fill_between(x_data[:,0],mu_z2+1.96*np.sqrt(np.diag(Cu_z2)), mu_z2-1.96*np.sqrt(np.diag(Cu_z2)), label = "y from FEM (z+noise) 95 confidence", alpha = 0.5)
+    plt.plot(x_data,y, '+', label = "data")
+    plt.title("Posterior solutions")
+    plt.xlabel("x [m]")
+    plt.ylabel("y")
+    plt.legend()
     plt.show()

@@ -378,6 +378,38 @@ class LinearSolver(object):
 
         return scalefact*muy, Cuy
 
+    def solve_posterior_real(self):
+        r"""
+        Solve for the posterior of the real process
+
+        This method solves for the posterior of the real process before looking at the data.
+        The main computational cost is solving for the prior of the covariance, so if this is
+        cached from a previous solve this is a simple calculation.
+
+        :returns: FEM posterior mean and covariance of the true real process (as a tuple of
+                  numpy arrays) on the root process. Non-root processes return numpy arrays of
+                  shape ``(0,)`` (mean) and ``(0, 0)`` (covariance).
+        :rtype: tuple of ndarrays
+        """
+
+        # create interpolation matrix if not cached
+
+        muy, Cuy = self.solve_posterior_covariance()
+
+        if self.params is None:
+            raise ValueError("must set parameter values to solve posterior of real process")
+
+        rho = np.exp(self.params[0])
+
+        if self.G.comm.rank == 0 and self.ensemble_comm.rank == 0:
+            m_zeta = rho*muy
+            C_zeta = rho**2*Cuy + self.data.calc_K(self.params[1:])
+        else:
+            m_zeta = np.zeros(0)
+            C_zeta = np.zeros((0,0))
+
+        return m_zeta, C_zeta
+
     def solve_prior_generating(self):
         r"""
         Solve for the prior of the generating process
