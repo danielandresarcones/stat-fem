@@ -74,7 +74,6 @@ if makeplot:
     surf = tripcolor(displacements, axes=axes)
     axes.set_aspect("equal");
     fig_1.colorbar(surf)
-    plt.show()
 
 # Create some fake data that is systematically different from the FEM solution.
 # note that all parameters are on a log scale, so we take the true values
@@ -91,16 +90,17 @@ l_eta = np.log(0.5)
 
 # data statistical errors (taken to be known)
 sigma_y = 2.e-3
-datagrid = 2
-ndata = datagrid**2
+datagrid_x = 6
+datagrid_y = 3
+ndata = datagrid_x*datagrid_y
 
 # create fake data on a grid
 x_data = np.zeros((ndata, 2))
 count = 0
-for i in range(datagrid):
-    for j in range(datagrid):
-        x_data[count, 0] = float(i+1)/float(datagrid + 1) * length
-        x_data[count, 1] = float(j+1)/float(datagrid + 1) * width
+for i in range(datagrid_x):
+    for j in range(datagrid_y):
+        x_data[count, 0] = float(i+1)/float(datagrid_x + 1) * length
+        x_data[count, 1] = float(j+1)/float(datagrid_y + 1) * width
         count += 1
 
 # fake data is the true FEM solution, scaled by the mismatch factor rho, with
@@ -120,7 +120,6 @@ if makeplot:
     plt.colorbar()
     axes_2.set_aspect = "equal"
     plt.title("Prior FEM solution and data")
-    plt.show()
 
 # Begin stat-fem solution
 
@@ -150,12 +149,27 @@ obs_data = stat_fem.ObsData(x_data, y_data_obs, sigma_obs)
 # were unlucky with random sampling!)
 A = assemble(a, bcs = bc)
 b = assemble(L)
-ls = stat_fem.estimate_params_MAP(A, b, G, obs_data, solver_parameters=options, near_nullspace=nullmodes, output_index_dimensions = [0,1])
+ls, samples = stat_fem.estimate_params_MCMC(A, b, G, obs_data, stabilise = True, solver_parameters=options, near_nullspace=nullmodes, output_index_dimensions = [0,1])
 
 print("MLE parameter estimates:")
 print(ls.params)
 print("Actual input parameters:")
-print(np.array([rho, sigma_eta, l_eta]))
+true_values = np.array([rho, sigma_eta, l_eta])
+print(true_values)
+
+figure, axes = plt.subplots(3)
+figure.suptitle("MCMC 20000 samples")
+names = [r"$\rho$",r"$\sigma_d$",r"$l_d$"]
+p_names = [r"$p(\rho)$",r"$p(\sigma_d$)",r"p($l_d$)"]
+for i in range(3):
+    axes[i].hist(np.exp(samples[:, i]), 100, color='k', histtype="step")
+    axes[i].set(xlabel = names[i], ylabel = p_names[i])
+    axes[i].axvline(x=np.exp(ls.params[i]), c='b',linestyle = '-', label = "Estimate")
+    axes[i].axvline(x=np.exp(true_values[i]), c='r',linestyle = '--', label = "True")
+    axes[i].legend()
+
+
+
 
 # Estimation function returns a re-usable LinearSolver object, which we can use to compute the
 # posterior FEM solution conditioned on the data

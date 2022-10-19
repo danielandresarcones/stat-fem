@@ -119,12 +119,15 @@ def estimate_params_MAP(A, b, G, data, priors=[None, None, None], start=None, en
 
     return ls
 
-def estimate_params_MCMC(A, b, G, data, priors=[None, None, None], start=None, ensemble_comm=COMM_SELF, output_index_dimensions = [], stabilise = False, **kwargs):
+def estimate_params_MCMC(A, b, G, data, priors=[None, None, None], start=None, 
+                        n_walkers = 10, n_samples = 20000, n_burn_in = 2000, ensemble_comm=COMM_SELF,
+                        parameter_limits = [[-5,5],[-10,2],[-10,2]], 
+                        output_index_dimensions = [], stabilise = False, progress = False, **kwargs):
     """
-    Estimate model hyperparameters using MAP estimation
+    Estimate model hyperparameters using MCMC estimation
 
     This function uses maximum a posteriori estimation to fit parameters for a Statistical FEM model.
-    The function is a wrapper to the Scipy LBFGS function to minimize the marginal log posterior,
+    The function is a wrapper to the emcee MCMC function to minimize the marginal log posterior,
     returning a fit ``LinearSolver`` object. This allows re-use of the cached Forcing Covariance
     function solves for each sensor, which greatly improves efficiency of the computation.
 
@@ -196,12 +199,6 @@ def estimate_params_MCMC(A, b, G, data, priors=[None, None, None], start=None, e
         except TypeError:
             out_dim = [0]
 
-############# INCLUDE AS ARGUMENTS LATER ###############
-    n_walkers = 10
-    n_samples = 20000
-    n_burn_in = 2000
-    makeplot = False
-########################################################
 
     p0 = np.random.rand(n_walkers, 3)
 
@@ -221,33 +218,18 @@ def estimate_params_MCMC(A, b, G, data, priors=[None, None, None], start=None, e
 
     def loglikelihood(params):
 
-        if -5 < params[0] < 5 and -10 < params[1] < 2 and -10 < params[2] < 2:
+        if parameter_limits[0][0] < params[0] < parameter_limits[0][1] and parameter_limits[1][0] < params[1] < parameter_limits[1][1] and parameter_limits[2][0] < params[2] < parameter_limits[2][1]:
             return -ls.logposterior(params)
         return -np.inf
 
     print(f"Burn in MCMC with {n_walkers} walkers and {n_burn_in} samples.")
     sampler = emcee.EnsembleSampler(n_walkers, 3, loglikelihood)
     # sampler = emcee.EnsembleSampler(n_walkers, 3, lambda x: -ls.logposterior(x))
-    state = sampler.run_mcmc(p0,n_burn_in, progress = True)
+    state = sampler.run_mcmc(p0,n_burn_in, progress = progress)
     samples_burn = sampler.get_chain(flat = True)
 
-    if makeplot:
-        plt.hist(samples_burn[:, 0], 100, color="k", histtype="step")
-        plt.xlabel(r"$\rho_1$")
-        plt.ylabel(r"$p(\rho_1)$")
-        plt.gca().set_yticks([]);
-        plt.hist(samples_burn[:, 1], 100, color="r", histtype="step")
-        plt.xlabel(r"$\sigma_1$")
-        plt.ylabel(r"$p(\sigma_1)$")
-        plt.gca().set_yticks([]);
-        plt.hist(samples_burn[:, 2], 100, color="b", histtype="step")
-        plt.xlabel(r"$l$")
-        plt.ylabel(r"$p(l)$")
-        plt.gca().set_yticks([]);
-    sampler.reset()
-
     print(f"Solving MCMC with {n_walkers} walkers and {n_samples} samples.")
-    sampler.run_mcmc(state, n_samples, progress = True)
+    sampler.run_mcmc(state, n_samples, progress = progress)
     print(f"Acceptance fraction: {np.mean(sampler.acceptance_fraction)}")
 
     # broadcast result to all processes

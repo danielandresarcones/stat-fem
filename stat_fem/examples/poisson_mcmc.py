@@ -42,7 +42,7 @@ solve(A, u, b)
 # and take the logarithm
 
 # forcing covariance parameters (taken to be known)
-sigma_f = np.log(2.e-2)
+sigma_f = 0.0
 l_f = np.log(0.354)
 
 # model discrepancy parameters (need to be estimated)
@@ -98,12 +98,25 @@ obs_data = stat_fem.ObsData(x_data, y, sigma_y)
 # Should get a good estimate of these values for this example problem (if not, you
 # were unlucky with random sampling!)
 
-ls = stat_fem.estimate_params_MCMC(A, b, G, obs_data)
+ls, samples = stat_fem.estimate_params_MCMC(A, b, G, obs_data)
 
 print("MLE parameter estimates:")
 print(ls.params)
 print("Actual input parameters:")
+true_values = [rho, sigma_eta, l_eta]
 print(np.array([rho, sigma_eta, l_eta]))
+
+if makeplots:
+    figure, axes = plt.subplots(3)
+    figure.suptitle("MCMC 20000 samples")
+    names = [r"$\rho$",r"$\sigma_d$",r"$l_d$"]
+    p_names = [r"$p(\rho)$",r"$p(\sigma_d$)",r"p($l_d$)"]
+    for i in range(3):
+        axes[i].hist(np.exp(samples[:, i]), 100, color='k', histtype="step")
+        axes[i].set(xlabel = names[i], ylabel = p_names[i])
+        axes[i].axvline(x=np.exp(ls.params[i]), c='b',linestyle = '-', label = "Estimate")
+        axes[i].axvline(x=np.exp(true_values[i]), c='r',linestyle = '--', label = "True")
+        axes[i].legend()
 
 # Estimation function returns a re-usable LinearSolver object, which we can use to compute the
 # posterior FEM solution conditioned on the data
