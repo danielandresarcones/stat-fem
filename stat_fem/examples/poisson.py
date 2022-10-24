@@ -1,9 +1,15 @@
 import numpy as np
-from firedrake import UnitSquareMesh, FunctionSpace, TrialFunction, TestFunction
-from firedrake import SpatialCoordinate, dx, pi, sin, dot, grad, DirichletBC
-from firedrake import assemble, Function, solve
+from ufl import TrialFunction, TestFunction
+from ufl import SpatialCoordinate, dx, pi, sin, dot, grad
+import dolfinx.fem
+from dolfinx.fem.petsc import PETSc
+from dolfinx.fem import FunctionSpace, Function, dirichletbc
+from petsc4py.PETSc import ScalarType
+import sys
+sys.path.append("/home/darcones/firedrake/stat-fem")
 import stat_fem
 from stat_fem.covariance_functions import sqexp
+from mpi4py import MPI
 try:
     import matplotlib.pyplot as plt
     makeplots = True
@@ -14,28 +20,38 @@ except ImportError:
 
 nx = 101
 
-mesh = UnitSquareMesh(nx - 1, nx - 1)
-V = FunctionSpace(mesh, "CG", 1)
+mesh = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, nx - 1, nx - 1)
+V = FunctionSpace(mesh, ("CG", 1))
 
 u = TrialFunction(V)
 v = TestFunction(V)
 
 f = Function(V)
 x = SpatialCoordinate(mesh)
-f.interpolate((8*pi*pi)*sin(x[0]*pi*2)*sin(x[1]*pi*2))
+f = (8*pi*pi)*sin(x[0]*pi*2)*sin(x[1]*pi*2)
 
-a = (dot(grad(v), grad(u))) * dx
-L = f * v * dx
+a = dolfinx.fem.form((dot(grad(v), grad(u))) * dx)
+L = dolfinx.fem.form(f * v * dx)
 
-bc = DirichletBC(V, 0., "on_boundary")
+facets = dolfinx.mesh.locate_entities_boundary(mesh, dim=1,
+                                       marker=lambda x: np.logical_or(np.isclose(x[0], 0.0),
+                                                                      np.isclose(x[0], 1.0)))
+dofs = dolfinx.fem.locate_dofs_topological(V=V, entity_dim=1, entities=facets)
+bc = dirichletbc(value=ScalarType(0), dofs=dofs, V=V)
 
-A = assemble(a, bcs = bc)
+A = dolfinx.fem.petsc.assemble_matrix(a, bcs = [bc])
+A.assemble()
 
-b = assemble(L)
+b = dolfinx.fem.petsc.assemble_vector(L)
+dolfinx.fem.petsc.apply_lifting(b, [a], bcs=[[bc]])
+b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
+dolfinx.fem.petsc.set_bc(b, [bc])
 
 u = Function(V)
 
-solve(A, u, b)
+problem = dolfinx.fem.petsc.LinearProblem(a, L, u=u, bcs=[bc], petsc_options={"ksp_type": "preonly", "pc_type": "lu"})
+u = problem.solve()
+
 
 # Create some fake data that is systematically different from the FEM solution.
 # note that all parameters are on a log scale, so we take the true values
@@ -73,14 +89,14 @@ y = (np.exp(rho)*np.sin(2.*np.pi*x_data[:,0])*np.sin(2.*np.pi*x_data[:,1]) +
 
 # visualize the prior FEM solution and the synthetic data
 
-if makeplots:
-    plt.figure()
-    plt.tripcolor(mesh.coordinates.vector().dat.data[:,0], mesh.coordinates.vector().dat.data[:,1],
-                  u.vector().dat.data)
-    plt.colorbar()
-    plt.scatter(x_data[:,0], x_data[:,1], c = y, cmap="Greys_r")
-    plt.colorbar()
-    plt.title("Prior FEM solution and data")
+# if makeplots:
+#     plt.figure()
+#     plt.tripcolor(mesh.coordinates.vector().dat.data[:,0], mesh.coordinates.vector().dat.data[:,1],
+#                   u.vector().dat.data)
+#     plt.colorbar()
+#     plt.scatter(x_data[:,0], x_data[:,1], c = y, cmap="Greys_r")
+#     plt.colorbar()
+#     plt.title("Prior FEM solution and data")
 
 # Begin stat-fem solution
 

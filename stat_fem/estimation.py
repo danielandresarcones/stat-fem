@@ -2,13 +2,12 @@ from typing import Type
 import numpy as np
 import emcee
 from scipy.optimize import minimize
-from firedrake import COMM_SELF, COMM_WORLD
 from sympy import true
 from .LinearSolver import LinearSolver
 from mpi4py import MPI
 import matplotlib.pyplot as plt
 
-def estimate_params_MAP(A, b, G, data, priors=[None, None, None], start=None, ensemble_comm=COMM_SELF, output_index_dimensions = [], stabilise = False, **kwargs):
+def estimate_params_MAP(A, b, G, data, priors=[None, None, None], start=None, ensemble_comm=MPI.COMM_SELF, output_index_dimensions = [], stabilise = False, **kwargs):
     """
     Estimate model hyperparameters using MAP estimation
 
@@ -120,7 +119,7 @@ def estimate_params_MAP(A, b, G, data, priors=[None, None, None], start=None, en
     return ls
 
 def estimate_params_MCMC(A, b, G, data, priors=[None, None, None], start=None, 
-                        n_walkers = 10, n_samples = 20000, n_burn_in = 2000, ensemble_comm=COMM_SELF,
+                        n_walkers = 10, n_samples = 20000, n_burn_in = 2000, ensemble_comm=MPI.COMM_SELF,
                         parameter_limits = [[-5,5],[-10,2],[-10,2]], 
                         output_index_dimensions = [], stabilise = False, progress = False, **kwargs):
     """

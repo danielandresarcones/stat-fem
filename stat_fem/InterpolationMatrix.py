@@ -1,11 +1,11 @@
 import numpy as np
 import ufl
-from firedrake import Function
-from firedrake.petsc import PETSc
-from firedrake.functionspace import VectorFunctionSpace
-from firedrake.functionspaceimpl import WithGeometry
-from firedrake.interpolation import interpolate
-from firedrake.vector import Vector
+from dolfinx.fem import Function
+from dolfinx.fem.petsc import PETSc
+from dolfinx.fem import VectorFunctionSpace
+# from firedrake.functionspaceimpl import WithGeometry
+# from firedrake.interpolation import interpolate
+# from firedrake.vector import Vector
 
 class InterpolationMatrix(object):
     """

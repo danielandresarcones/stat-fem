@@ -1,15 +1,16 @@
 import numpy as np
-from firedrake.assemble import assemble
-from firedrake.constant import Constant
-from firedrake.function import Function
-from firedrake.functionspace import VectorFunctionSpace
-from firedrake.functionspaceimpl import WithGeometry
-from firedrake.interpolation import interpolate
-from firedrake.ufl_expr import TestFunction
-from firedrake.vector import Vector
+from dolfinx.fem import assemble
+from ufl import Constant
+from mpi4py import MPI
+from dolfinx.fem.function import Function
+from dolfinx.fem import VectorFunctionSpace
+# from firedrake.functionspaceimpl import WithGeometry
+# from firedrake.interpolation import interpolate
+from ufl import TestFunction
+import dolfinx
+from dolfinx.fem.petsc import PETSc
 from ufl import dx
 from ufl import VectorElement
-from firedrake.petsc import PETSc
 from .covariance_functions import sqexp
 
 class ForcingCovariance(object):
@@ -72,17 +73,17 @@ class ForcingCovariance(object):
         # know that we have reduced bandwidth (though unclear if this translates to a low
         # bandwidth of the assembled covariance matrix)
 
-        if not isinstance(function_space, WithGeometry):
-            raise TypeError("bad input type for function_space: must be a FunctionSpace")
+        # if not isinstance(function_space, WithGeometry):
+            # raise TypeError("bad input type for function_space: must be a FunctionSpace")
 
         self.function_space = function_space
 
-        self.comm = function_space.comm
+        self.comm = MPI.COMM_WORLD
 
         # extract mesh and process local information
 
-        self.nx = Function(self.function_space).vector().size()
-        self.nx_local = Function(self.function_space).vector().local_size()
+        self.nx = Function(self.function_space).vector.size
+        self.nx_local = Function(self.function_space).vector.local_size
 
         # set parameters and covariance
 
@@ -126,7 +127,7 @@ class ForcingCovariance(object):
 
         v = TestFunction(function_space)
 
-        return np.array(assemble(Constant(1.) * v * dx).vector().gather())
+        return np.array(dolfinx.fem.petsc.assemble_vector(dolfinx.fem.form(1.0* v * dx)))
 
     def _compute_G_vals(self):
         """
@@ -142,48 +143,28 @@ class ForcingCovariance(object):
                   represented by those matrix entries.
         :rtype: tuple
         """
-        # if isinstance(self.sigma, list):
-        #     G_dict = [dict()]*len(self.sigma)
-        #     nnz = [0.0]*len(self.sigma)
-        #     for dim in range(len(self.sigma)):
-        #         int_basis = self._integrate_basis_functions(self.function_space.sub(dim))
-        #         mesh = self.function_space.sub(dim).ufl_domain()
-        #         W = VectorFunctionSpace(mesh, self.function_space.sub(dim).ufl_element())
-        #         X = interpolate(mesh.coordinates, W)
-        #         meshvals = X.vector().gather()
-        #         if X.dat.data.ndim == 2:
-        #             meshvals = np.reshape(meshvals, (-1, X.dat.data.shape[1]))
-        #         else:
-        #             meshvals = np.reshape(meshvals, (-1, 1))
-        #         assert meshvals.shape[0] == self.nx/len(self.sigma), "error in gathering mesh coordinates"
 
-        #         for i in range(self.local_startind, self.local_endind):
-        #             row = (int_basis[i]*int_basis*
-        #                 self.cov(meshvals[i], meshvals, self.sigma[dim], self.l[dim]))[0]
-        #             row[i] += self.regularization
-        #             above_cutoff = (row/row[i] > self.cutoff)
-        #             G_dict[dim][i] = (row[above_cutoff], np.arange(0, self.nx/len(self.sigma), dtype=PETSc.IntType)[above_cutoff])
-        #             new_nnz = int(np.sum(above_cutoff))
-        #             if new_nnz > nnz[dim]:
-        #                 nnz[dim] = new_nnz
-        # else:
-
-        ################### LOOK INTO THE DIMENSIONS OF THE TENSORS #########################
         G_dict = {}
         nnz = 0
-        int_basis = self._integrate_basis_functions(self.function_space.sub(0))
-        mesh = self.function_space.ufl_domain()
+        try:
+            int_basis = self._integrate_basis_functions(self.function_space.sub(0))
+        except AssertionError:                                                      #TODO: THIS IS EXTREMELY DANGEROUS!!!!
+            int_basis = self._integrate_basis_functions(self.function_space)
+
+        mesh = self.function_space.mesh
         if isinstance(self.function_space.ufl_element(), VectorElement):
             W = self.function_space
         else:
-            W = VectorFunctionSpace(mesh, self.function_space.ufl_element())
-        X = interpolate(mesh.coordinates, W)
-        meshvals = X.vector().gather()
-        if X.dat.data.ndim == 2:
-            meshvals = np.reshape(meshvals, (-1, X.dat.data.shape[1]))
-        else:
-            meshvals = np.reshape(meshvals, (-1, 1))
-        assert meshvals.shape[0] == self.nx_local, "error in gathering mesh coordinates"
+            element = self.function_space.ufl_element()
+            W = VectorFunctionSpace(mesh, (element.family(), element.degree()))
+        # x = Function(W)
+        meshvals = mesh.geometry.x
+        # meshvals = X.vector().gather()
+        # if X.dat.data.ndim == 2:
+        #     meshvals = np.reshape(meshvals, (-1, X.dat.data.shape[1]))
+        # else:
+        #     meshvals = np.reshape(meshvals, (-1, 1))
+        # assert meshvals.shape[0] == self.nx_local, "error in gathering mesh coordinates"
 
         for i in range(self.local_startind, self.local_endind):
             for j in range(len(self.sigma)):
@@ -277,8 +258,8 @@ class ForcingCovariance(object):
         :returns: None
         """
 
-        assert isinstance(x, Vector), "x must be a firedrake vector"
-        assert isinstance(y, Vector), "y must be a firedrake vector"
+        assert isinstance(x, PETSc.Vector), "x must be a firedrake vector"
+        assert isinstance(y, PETSc.Vector), "y must be a firedrake vector"
 
         if not self.is_assembled:
             self.assemble()

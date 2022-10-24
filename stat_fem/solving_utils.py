@@ -1,9 +1,9 @@
 import numpy as np
-from firedrake import COMM_SELF
-from firedrake.function import Function
-from firedrake.petsc import PETSc
-from firedrake.linear_solver import LinearSolver
-from firedrake.vector import Vector
+from mpi4py import MPI
+from dolfinx.fem import Function
+from petsc4py import PETSc
+# from dolfinx.fem.PETSc import LinearProblem
+# from petsc4py.PETSc import Vector
 from .ForcingCovariance import ForcingCovariance
 from .InterpolationMatrix import InterpolationMatrix
 
@@ -36,9 +36,9 @@ def solve_forcing_covariance(G, ls, rhs):
 
     if not isinstance(G, ForcingCovariance):
         raise TypeError("G must be a ForcingCovariance object")
-    if not isinstance(ls, LinearSolver):
-        raise TypeError("ls must be a firedrake LinearSolver")
-    if not isinstance(rhs, Vector):
+    # if not isinstance(ls, LinearProblem):
+    #     raise TypeError("ls must be a firedrake LinearSolver")
+    if not isinstance(rhs, PETSc.Vector):
         raise TypeError("rhs must be a firedrake vector")
 
     # turn off BC application temporarily
@@ -58,7 +58,7 @@ def solve_forcing_covariance(G, ls, rhs):
     
     return x.copy()
 
-def interp_covariance_to_data(im_left, G, ls, im_right, ensemble_comm=COMM_SELF):
+def interp_covariance_to_data(im_left, G, ls, im_right, ensemble_comm=MPI.COMM_SELF):
     """
     Solve for the interpolated covariance matrix
 
@@ -103,13 +103,13 @@ def interp_covariance_to_data(im_left, G, ls, im_right, ensemble_comm=COMM_SELF)
 
     if not isinstance(im_left, InterpolationMatrix):
         raise TypeError("first argument to interp_covariance_to_data must be an InterpolationMatrix")
-    if not isinstance(ls, LinearSolver):
+    if not isinstance(ls, LinearProblem):
         raise TypeError("ls must be a firedrake LinearSolver")
     if not isinstance(G, ForcingCovariance):
         raise TypeError("G must be a ForcingCovariance class")
     if not isinstance(im_right, InterpolationMatrix):
         raise TypeError("fourth argument to interp_covariance_to_data must be an InterpolationMatrix")
-    if not isinstance(ensemble_comm, type(COMM_SELF)):
+    if not isinstance(ensemble_comm, type(MPI.COMM_SELF)):
         raise TypeError("ensemble_comm must be an MPI communicator created from a firedrake Ensemble")
 
     # use ensemble comm to split up solves across ensemble processes

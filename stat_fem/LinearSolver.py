@@ -1,11 +1,11 @@
 import numpy as np
 from scipy.linalg import cho_factor, cho_solve
 from scipy.linalg import LinAlgError
-from firedrake import COMM_WORLD, COMM_SELF
-from firedrake.function import Function
-from firedrake.matrix import MatrixBase
-from firedrake.vector import Vector
-from firedrake.linear_solver import LinearSolver as fdLS
+from mpi4py import MPI
+from dolfinx.fem import Function
+# from dolfinx.fem.PETSc import MatrixBase
+# from dolfinx.fem.PETSc import Vector
+from dolfinx.fem.petsc import PETSc
 from .ForcingCovariance import ForcingCovariance
 from .InterpolationMatrix import InterpolationMatrix
 from .ObsData import ObsData
@@ -60,7 +60,7 @@ class LinearSolver(object):
     :type current_logpost: float
     """
 
-    def __init__(self, A, b, G, data, *, priors=[None, None, None], ensemble_comm=COMM_SELF,
+    def __init__(self, A, b, G, data, *, priors=[None, None, None], ensemble_comm=MPI.COMM_SELF,
                  P=None, solver_parameters=None, nullspace=None,
                  transpose_nullspace=None, near_nullspace=None,
                  options_prefix=None, out_dim = [], stabilise = False):
@@ -115,9 +115,9 @@ class LinearSolver(object):
         :rtype: LinearSolver
         """
 
-        if not isinstance(A, MatrixBase):
+        if not isinstance(A, PETSc.Mat):
            raise TypeError("A must be a firedrake matrix")
-        if not isinstance(b, (Function, Vector)):
+        if not isinstance(b, (Function, PETSc.Vec)):
             raise TypeError("b must be a firedrake function or vector")
         if not isinstance(G, ForcingCovariance):
             raise TypeError("G must be a forcing covariance")
@@ -130,7 +130,7 @@ class LinearSolver(object):
         for p in priors:
             if not p is None:
                 raise TypeError("priors must be a list of prior objects or None")
-        if not isinstance(ensemble_comm, type(COMM_WORLD)):
+        if not isinstance(ensemble_comm, type(MPI.COMM_WORLD)):
             raise TypeError("ensemble_comm must be an MPI communicator created with a firedrake Ensemble")
 
         self.solver = fdLS(A, P=P, solver_parameters=solver_parameters,
@@ -635,7 +635,7 @@ class LinearSolver(object):
 
         # compute log-likelihood on root process and broadcast
 
-        if COMM_WORLD.rank == 0:
+        if MPI.COMM_WORLD.rank == 0:
             KCu = rho**2*self.Cu + self.data.calc_K_plus_sigma(self.params[1:])
             try:
                 L = cho_factor(KCu)
@@ -652,11 +652,11 @@ class LinearSolver(object):
         else:
             log_posterior = None
 
-        log_posterior = COMM_WORLD.bcast(log_posterior, root=0)
+        log_posterior = MPI.COMM_WORLD.bcast(log_posterior, root=0)
 
         assert not log_posterior is None, "error in broadcasting the log likelihood"
 
-        COMM_WORLD.barrier()
+        MPI.COMM_WORLD.barrier()
 
         return log_posterior
 
@@ -694,7 +694,7 @@ class LinearSolver(object):
 
         # compute log-likelihood on root process
 
-        if COMM_WORLD.rank == 0:
+        if MPI.COMM_WORLD.rank == 0:
             KCu = rho**2*self.Cu + self.data.calc_K_plus_sigma(params[1:])
             try:
                 L = cho_factor(KCu)
@@ -720,10 +720,10 @@ class LinearSolver(object):
         else:
             deriv = None
 
-        deriv = COMM_WORLD.bcast(deriv, root=0)
+        deriv = MPI.COMM_WORLD.bcast(deriv, root=0)
 
         assert not deriv is None, "error in broadcasting the log likelihood derivative"
 
-        COMM_WORLD.barrier()
+        MPI.COMM_WORLD.barrier()
 
         return deriv

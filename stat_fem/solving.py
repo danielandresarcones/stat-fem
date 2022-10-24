@@ -3,10 +3,10 @@ Solving module just provides functional wrappers to the LinearSolver class for o
 For repeated use, please use the LinearSolver class
 """
 
-from firedrake import COMM_SELF
+from mpi4py import MPI
 from .LinearSolver import LinearSolver
 
-def solve_posterior(A, x, b, G, data, params, ensemble_comm=COMM_SELF, scale_mean=False, **kwargs):
+def solve_posterior(A, x, b, G, data, params, ensemble_comm=MPI.COMM_SELF, scale_mean=False, **kwargs):
     """
     Solve for the FEM posterior conditioned on the data
 
@@ -55,7 +55,7 @@ def solve_posterior(A, x, b, G, data, params, ensemble_comm=COMM_SELF, scale_mea
     ls.set_params(params)
     ls.solve_posterior(x, scale_mean)
 
-def solve_posterior_covariance(A, b, G, data, params, ensemble_comm=COMM_SELF, scale_mean=False, **kwargs):
+def solve_posterior_covariance(A, b, G, data, params, ensemble_comm=MPI.COMM_SELF, scale_mean=False, **kwargs):
     """
     Solve for the FEM posterior conditioned on the data and the covariance
 
@@ -103,7 +103,7 @@ def solve_posterior_covariance(A, b, G, data, params, ensemble_comm=COMM_SELF, s
     ls.set_params(params)
     return ls.solve_posterior_covariance(scale_mean)
 
-def solve_prior(A, b, G, data, ensemble_comm=COMM_SELF, **kwargs):
+def solve_prior(A, b, G, data, ensemble_comm=MPI.COMM_SELF, **kwargs):
     """
     Solve for the FEM prior and covariance
 
@@ -146,7 +146,7 @@ def solve_prior(A, b, G, data, ensemble_comm=COMM_SELF, **kwargs):
 
     return LinearSolver(A, b, G, data, ensemble_comm=ensemble_comm, **kwargs).solve_prior()
 
-def solve_prior_generating(A, b, G, data, params, ensemble_comm=COMM_SELF, **kwargs):
+def solve_prior_generating(A, b, G, data, params, ensemble_comm=MPI.COMM_SELF, **kwargs):
     """
     Solve for the FEM prior of the generating process and covariance
 
@@ -198,7 +198,7 @@ def solve_prior_generating(A, b, G, data, params, ensemble_comm=COMM_SELF, **kwa
     ls.set_params(params)
     return ls.solve_prior_generating()
 
-def solve_posterior_generating(A, b, G, data, params, ensemble_comm=COMM_SELF, **kwargs):
+def solve_posterior_generating(A, b, G, data, params, ensemble_comm=MPI.COMM_SELF, **kwargs):
     """
     Solve for the FEM posterior of the generating process and covariance
 
@@ -245,7 +245,7 @@ def solve_posterior_generating(A, b, G, data, params, ensemble_comm=COMM_SELF, *
     ls.set_params(params)
     return ls.solve_posterior_generating()
 
-def solve_posterior_real(A, b, G, data, params, ensemble_comm=COMM_SELF, **kwargs):
+def solve_posterior_real(A, b, G, data, params, ensemble_comm=MPI.COMM_SELF, **kwargs):
     """
     Solve for the FEM posterior of the generating process and covariance
 
@@ -292,7 +292,7 @@ def solve_posterior_real(A, b, G, data, params, ensemble_comm=COMM_SELF, **kwarg
     ls.set_params(params)
     return ls.solve_posterior_real()
 
-def predict_mean(A, b, G, data, params, coords, ensemble_comm=COMM_SELF, scale_mean=True, **kwargs):
+def predict_mean(A, b, G, data, params, coords, ensemble_comm=MPI.COMM_SELF, scale_mean=True, **kwargs):
     """
     Solve for the predicted mean FEM posterior values at new locations
 
@@ -349,7 +349,7 @@ def predict_mean(A, b, G, data, params, coords, ensemble_comm=COMM_SELF, scale_m
     return ls.predict_mean(coords, scale_mean)
 
 
-def predict_covariance(A, b, G, data, params, coords, unc, ensemble_comm=COMM_SELF, **kwargs):
+def predict_covariance(A, b, G, data, params, coords, unc, ensemble_comm=MPI.COMM_SELF, **kwargs):
     """
     Solve for the predicted covariance of the FEM posterior values at new locations
 
