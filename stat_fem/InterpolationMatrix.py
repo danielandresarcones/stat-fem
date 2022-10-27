@@ -1,8 +1,10 @@
 import numpy as np
 import ufl
+from ufl import VectorElement
 from dolfinx.fem import Function
 from dolfinx.fem.petsc import PETSc
 from dolfinx.fem import VectorFunctionSpace
+from dolfinx.geometry import (BoundingBoxTree, compute_colliding_cells, compute_collisions)
 # from firedrake.functionspaceimpl import WithGeometry
 # from firedrake.interpolation import interpolate
 # from firedrake.vector import Vector
@@ -58,15 +60,15 @@ class InterpolationMatrix(object):
     def __init__(self, function_space, coords, out_dim):
         "create and assemble interpolation matrix"
 
-        if not isinstance(function_space, WithGeometry):
-            raise TypeError("bad input type for function_space: must be a FunctionSpace")
+        # if not isinstance(function_space, WithGeometry):
+        #     raise TypeError("bad input type for function_space: must be a FunctionSpace")
 
         self.coords = np.copy(coords)
         self.function_space = function_space
-        self.comm = function_space.comm
+        self.comm = function_space.mesh.comm
 
         self.n_data = coords.shape[0]*len(out_dim)
-        assert (coords.shape[1] == self.function_space.mesh().cell_dimension()
+        assert (coords.shape[1] == self.function_space.mesh.geometry.dim
                 ), "shape of coordinates does not match mesh dimension"
 
         # allocate working vectors to handle parallel matrix operations and data transfer
@@ -85,12 +87,12 @@ class InterpolationMatrix(object):
 
         self.petsc_scatter, self.dataspace_gathered = PETSc.Scatter.toZero(self.dataspace_distrib)
 
-        self.meshspace_vector = Function(self.function_space).vector()
+        self.meshspace_vector = Function(self.function_space)
 
-        self.n_mesh_local = self.meshspace_vector.local_size()
-        self.n_mesh = self.meshspace_vector.size()
+        self.n_mesh_local = self.meshspace_vector.vector.local_size
+        self.n_mesh = self.meshspace_vector.vector.size
 
-        nnz = len(self.function_space.cell_node_list[0])
+        nnz = len(self.function_space.mesh.geometry.x)
 
         self.interp = PETSc.Mat().create(comm=self.comm)
         self.interp.setSizes(((self.n_mesh, -1), (self.n_data, -1)))
@@ -115,22 +117,29 @@ class InterpolationMatrix(object):
             return
 
         mesh = self.function_space.ufl_domain()
-        if not isinstance(self.function_space.ufl_element(), ufl.VectorElement):
-            W = VectorFunctionSpace(mesh, self.function_space.ufl_element())
-        else:
-            W = self.function_space
-        X = interpolate(mesh.coordinates, W)
-        meshvals_local = np.array(X.dat.data_with_halos)
+        # if isinstance(self.function_space.ufl_element(), VectorElement):
+        #     W = self.function_space
+        # else:
+        #     element = self.function_space.ufl_element()
+        #     W = VectorFunctionSpace(mesh, (element.family(), element.degree()))
+        # X = Function(self.function_space)
+        # X.interpolate(mesh.coordinates)
+        # meshvals_local = np.array(X.dat.data_with_halos)
+        meshvals_local = self.function_space.mesh.geometry.x
         imin, imax = self.interp.getOwnershipRange()
 
         # loop over all data points
 
         for i in range(self.n_data_local):
-            cell = self.function_space.mesh().locate_cell(self.coords[i])
+            tree = BoundingBoxTree(self.function_space.mesh, self.function_space.mesh.geometry.dim)
+            cell_candidates = compute_collisions(tree, self.coords[i])
+            cell = compute_colliding_cells(self.function_space.mesh, cell_candidates, self.coords[i])[0]
+            # cell = self.function_space.mesh.locate_cell(self.coords[i])
+            coords = np.pad(self.coords, ((0,0),(0,1)),'constant', constant_values = 0.0)
             if not cell is None:
-                nodes = self.function_space.cell_node_list[cell]
+                nodes = self.function_space.dofmap.cell_dofs(cell)
                 points = meshvals_local[nodes]
-                interp_coords = interpolate_cell(self.coords[i], points)
+                interp_coords = interpolate_cell(coords[i], points)
                 for (node, val) in zip(nodes, interp_coords):
                     if node < self.n_mesh_local:
                         for j in range(self.n_mesh_local.denominator):
@@ -222,8 +231,8 @@ class InterpolationMatrix(object):
         self.dataspace_gathered.array = np.copy(data_array)
         self._scatter()
 
-        with self.meshspace_vector.dat.vec as vec:
-            self.interp.mult(self.dataspace_distrib, vec)
+        # with self.meshspace_vector as vec:
+        self.interp.mult(self.dataspace_distrib, self.meshspace_vector.vector)
 
         return self.meshspace_vector.copy()
 
@@ -250,16 +259,16 @@ class InterpolationMatrix(object):
             self.assemble()
 
         # check vector local sizes and copy values
-        if not isinstance(input_mesh_vector, Vector):
+        if not isinstance(input_mesh_vector, PETSc.Vec):
             raise TypeError("input_mesh_vector must be a firedrake vector")
-        assert (input_mesh_vector.local_size() == self.meshspace_vector.local_size() and
-                input_mesh_vector.size() == self.meshspace_vector.size()), "input vector must be the same length as the FEM DOFs and be distributed across processes in the same way"
-        self.meshspace_vector.set_local(input_mesh_vector.get_local())
+        assert (input_mesh_vector.local_size == self.meshspace_vector.vector.local_size and
+                input_mesh_vector.size == self.meshspace_vector.vector.size), "input vector must be the same length as the FEM DOFs and be distributed across processes in the same way"
+        self.meshspace_vector.vector.array[:] = input_mesh_vector.array[:]
 
         # interpolate to dataspace and gather, returning numpy array
 
-        with self.meshspace_vector.dat.vec_ro as b:
-            self.interp.multTranspose(b, self.dataspace_distrib)
+        # with self.meshspace_vector as b:
+        self.interp.multTranspose(self.meshspace_vector.vector, self.dataspace_distrib)
 
         self._gather()
 
@@ -287,9 +296,9 @@ class InterpolationMatrix(object):
         if not self.is_assembled:
             self.assemble()
 
-        f = Function(self.function_space).vector()
+        f = Function(self.function_space)
 
-        f.set_local(self.interp.getColumnVector(idx).array)
+        f.vector.array[:] = self.interp.getColumnVector(idx).array[:]
 
         return f
 

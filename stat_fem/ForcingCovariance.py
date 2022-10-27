@@ -258,17 +258,17 @@ class ForcingCovariance(object):
         :returns: None
         """
 
-        assert isinstance(x, PETSc.Vector), "x must be a firedrake vector"
-        assert isinstance(y, PETSc.Vector), "y must be a firedrake vector"
+        assert isinstance(x, PETSc.Vec), "x must be a firedrake vector"
+        assert isinstance(y, PETSc.Vec), "y must be a firedrake vector"
 
         if not self.is_assembled:
             self.assemble()
 
-        with x.dat.vec_ro as xtmp:
-            with y.dat.vec as ytmp:
-                if reduce:
-                    ratio = xtmp.size / self.nx
-                self.G.mult(xtmp, ytmp)
+        # with x as xtmp:
+        #     with y as ytmp:
+        if reduce:
+            ratio = x.size / self.nx
+        self.G.mult(x, y)
 
     def get_nx(self):
         """

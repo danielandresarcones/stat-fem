@@ -2,7 +2,8 @@ import numpy as np
 from scipy.linalg import cho_factor, cho_solve
 from scipy.linalg import LinAlgError
 from mpi4py import MPI
-from dolfinx.fem import Function
+import dolfinx
+from dolfinx.fem import Function, form
 # from dolfinx.fem.PETSc import MatrixBase
 # from dolfinx.fem.PETSc import Vector
 from dolfinx.fem.petsc import PETSc
@@ -60,7 +61,7 @@ class LinearSolver(object):
     :type current_logpost: float
     """
 
-    def __init__(self, A, b, G, data, *, priors=[None, None, None], ensemble_comm=MPI.COMM_SELF,
+    def __init__(self, problem, G, data, *, priors=[None, None, None], ensemble_comm=MPI.COMM_SELF,
                  P=None, solver_parameters=None, nullspace=None,
                  transpose_nullspace=None, near_nullspace=None,
                  options_prefix=None, out_dim = [], stabilise = False):
@@ -115,10 +116,6 @@ class LinearSolver(object):
         :rtype: LinearSolver
         """
 
-        if not isinstance(A, PETSc.Mat):
-           raise TypeError("A must be a firedrake matrix")
-        if not isinstance(b, (Function, PETSc.Vec)):
-            raise TypeError("b must be a firedrake function or vector")
         if not isinstance(G, ForcingCovariance):
             raise TypeError("G must be a forcing covariance")
         if not isinstance(data, ObsData):
@@ -133,12 +130,7 @@ class LinearSolver(object):
         if not isinstance(ensemble_comm, type(MPI.COMM_WORLD)):
             raise TypeError("ensemble_comm must be an MPI communicator created with a firedrake Ensemble")
 
-        self.solver = fdLS(A, P=P, solver_parameters=solver_parameters,
-                           nullspace=nullspace,
-                           transpose_nullspace=transpose_nullspace,
-                           near_nullspace=near_nullspace,
-                           options_prefix=options_prefix)
-        self.b = b
+        self.solver = problem
         self.G = G
         self.data = data
         self.ensemble_comm = ensemble_comm
@@ -220,8 +212,8 @@ class LinearSolver(object):
         self.x = Function(self.G.function_space)
 
         if self.ensemble_comm.rank == 0:
-            self.solver.solve(self.x, self.b)
-            self.mu = self.im.interp_mesh_to_data(self.x.vector())
+            self.x = self.solver.solve()
+            self.mu = self.im.interp_mesh_to_data(self.x.vector)
         else:
             self.mu = np.zeros(0)
 
@@ -289,8 +281,9 @@ class LinearSolver(object):
             tmp_meshspace_1 = self.im.interp_data_to_mesh(tmp_dataspace_1)
 
             # solve forcing covariance and interpolate to dataspace
-
-            tmp_meshspace_2 = solve_forcing_covariance(self.G, self.solver, tmp_meshspace_1)._scale(rho) + self.x.vector()
+            tmp_array = solve_forcing_covariance(self.G, self.solver, tmp_meshspace_1)
+            tmp_array.array[:] = tmp_array.array[:]*rho + self.x.vector.array[:]
+            tmp_meshspace_2 = tmp_array 
 
             tmp_dataspace_1 = self.im.interp_mesh_to_data(tmp_meshspace_2)
 
@@ -306,10 +299,13 @@ class LinearSolver(object):
 
             tmp_meshspace_1 = self.im.interp_data_to_mesh(tmp_dataspace_2)
 
-            tmp_meshspace_1 = solve_forcing_covariance(self.G, self.solver, tmp_meshspace_1)._scale(rho**2)
+            tmp_array = solve_forcing_covariance(self.G, self.solver, tmp_meshspace_1)
+            tmp_array.array[:] = tmp_array.array[:]*rho**2
+            tmp_meshspace_1 = tmp_array
 
-            x.assign((tmp_meshspace_2 - tmp_meshspace_1)._scale(scalefact).function)
-
+            # x.assign((tmp_meshspace_2 - tmp_meshspace_1)._scale(scalefact).function)
+            x.x.array[:] = (tmp_meshspace_2.array[:] - tmp_meshspace_1.array[:])*(scalefact)
+            
 
     def solve_posterior_covariance(self, scale_mean=False):
         r"""

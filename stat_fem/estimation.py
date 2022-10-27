@@ -7,7 +7,7 @@ from .LinearSolver import LinearSolver
 from mpi4py import MPI
 import matplotlib.pyplot as plt
 
-def estimate_params_MAP(A, b, G, data, priors=[None, None, None], start=None, ensemble_comm=MPI.COMM_SELF, output_index_dimensions = [], stabilise = False, **kwargs):
+def estimate_params_MAP(problem, G, data, priors=[None, None, None], start=None, ensemble_comm=MPI.COMM_SELF, output_index_dimensions = [], stabilise = False, **kwargs):
     """
     Estimate model hyperparameters using MAP estimation
 
@@ -84,17 +84,17 @@ def estimate_params_MAP(A, b, G, data, priors=[None, None, None], start=None, en
         except TypeError:
             out_dim = [0]
 
-    ls = LinearSolver(A, b, G, data, priors=priors, ensemble_comm=ensemble_comm,
+    ls = LinearSolver(problem, G, data, priors=priors, ensemble_comm=ensemble_comm,
                       **ls_kwargs, out_dim = out_dim, stabilise = stabilise)
 
     ls.solve_prior()
 
     if start is None:
-        if COMM_WORLD.rank == 0:
+        if MPI.COMM_WORLD.rank == 0:
             start = 5.*(np.random.random(3)-0.5)
         else:
             start = None
-        start = COMM_WORLD.bcast(start, root=0)
+        start = MPI.COMM_WORLD.bcast(start, root=0)
     else:
         assert np.array(start).shape == (3,), "bad shape for starting point"
 
@@ -106,13 +106,13 @@ def estimate_params_MAP(A, b, G, data, priors=[None, None, None], start=None, en
     # broadcast result to all processes
 
     result = fmin_dict['x']
-    root_result = COMM_WORLD.bcast(result, root=0)
+    root_result = MPI.COMM_WORLD.bcast(result, root=0)
     same_result = np.allclose(root_result, result)
-    diff_arg = COMM_WORLD.allreduce(int(not same_result), op=MPI.SUM)
+    diff_arg = MPI.COMM_WORLD.allreduce(int(not same_result), op=MPI.SUM)
 
     assert not diff_arg, "minimization did not produce identical results across all processes"
 
-    COMM_WORLD.barrier()
+    MPI.COMM_WORLD.barrier()
 
     ls.set_params(root_result)
 
@@ -207,11 +207,11 @@ def estimate_params_MCMC(A, b, G, data, priors=[None, None, None], start=None,
     ls.solve_prior()
 
     if start is None:
-        if COMM_WORLD.rank == 0:
+        if MPI.COMM_WORLD.rank == 0:
             start = 5.*(np.random.random(3)-0.5)
         else:
             start = None
-        start = COMM_WORLD.bcast(start, root=0)
+        start = MPI.COMM_WORLD.bcast(start, root=0)
     else:
         assert np.array(start).shape == (3,), "bad shape for starting point"
 

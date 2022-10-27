@@ -34,8 +34,10 @@ a = dolfinx.fem.form((dot(grad(v), grad(u))) * dx)
 L = dolfinx.fem.form(f * v * dx)
 
 facets = dolfinx.mesh.locate_entities_boundary(mesh, dim=1,
-                                       marker=lambda x: np.logical_or(np.isclose(x[0], 0.0),
-                                                                      np.isclose(x[0], 1.0)))
+                                       marker=lambda x: np.logical_or.reduce((np.isclose(x[0], 0.0),
+                                                                              np.isclose(x[0], 1.0),
+                                                                              np.isclose(x[1], 0.0),
+                                                                              np.isclose(x[1], 1.0))))
 dofs = dolfinx.fem.locate_dofs_topological(V=V, entity_dim=1, entities=facets)
 bc = dirichletbc(value=ScalarType(0), dofs=dofs, V=V)
 
@@ -89,14 +91,14 @@ y = (np.exp(rho)*np.sin(2.*np.pi*x_data[:,0])*np.sin(2.*np.pi*x_data[:,1]) +
 
 # visualize the prior FEM solution and the synthetic data
 
-# if makeplots:
-#     plt.figure()
-#     plt.tripcolor(mesh.coordinates.vector().dat.data[:,0], mesh.coordinates.vector().dat.data[:,1],
-#                   u.vector().dat.data)
-#     plt.colorbar()
-#     plt.scatter(x_data[:,0], x_data[:,1], c = y, cmap="Greys_r")
-#     plt.colorbar()
-#     plt.title("Prior FEM solution and data")
+if makeplots:
+    plt.figure()
+    plt.tripcolor(mesh.geometry.x[:,0], mesh.geometry.x[:,1],
+                  u.vector)
+    plt.colorbar()
+    plt.scatter(x_data[:,0], x_data[:,1], c = y, cmap="Greys_r")
+    plt.colorbar()
+    plt.title("Prior FEM solution and data")
 
 # Begin stat-fem solution
 
@@ -114,7 +116,7 @@ obs_data = stat_fem.ObsData(x_data, y, sigma_y)
 # Should get a good estimate of these values for this example problem (if not, you
 # were unlucky with random sampling!)
 
-ls = stat_fem.estimate_params_MAP(A, b, G, obs_data)
+ls = stat_fem.estimate_params_MAP(problem, G, obs_data)
 
 print("MLE parameter estimates:")
 print(ls.params)
@@ -143,8 +145,8 @@ muy2, Cuy = ls.solve_posterior_covariance()
 
 if makeplots:
     plt.figure()
-    plt.tripcolor(mesh.coordinates.vector().dat.data[:,0], mesh.coordinates.vector().dat.data[:,1],
-                  muy.vector().dat.data)
+    plt.tripcolor(mesh.geometry.x[:,0], mesh.geometry.x[:,1],
+                  muy.vector)
     plt.colorbar()
     plt.scatter(x_data[:,0], x_data[:,1], c = np.diag(Cuy), cmap="Greys_r")
     plt.colorbar()

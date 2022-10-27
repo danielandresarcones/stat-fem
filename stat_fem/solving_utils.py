@@ -2,10 +2,20 @@ import numpy as np
 from mpi4py import MPI
 from dolfinx.fem import Function
 from petsc4py import PETSc
+from sympy import solve_linear
+import ufl
+from petsc4py import PETSc
 # from dolfinx.fem.PETSc import LinearProblem
 # from petsc4py.PETSc import Vector
 from .ForcingCovariance import ForcingCovariance
 from .InterpolationMatrix import InterpolationMatrix
+
+def solve_linear_solver(A, x, b):
+    solver = PETSc.KSP().create(A.getComm())
+    solver.setOperators(A)
+    solver.solve(b, x)
+    return x
+
 
 def solve_forcing_covariance(G, ls, rhs):
     """
@@ -38,25 +48,25 @@ def solve_forcing_covariance(G, ls, rhs):
         raise TypeError("G must be a ForcingCovariance object")
     # if not isinstance(ls, LinearProblem):
     #     raise TypeError("ls must be a firedrake LinearSolver")
-    if not isinstance(rhs, PETSc.Vector):
+    if not isinstance(rhs.vector, PETSc.Vec):
         raise TypeError("rhs must be a firedrake vector")
 
     # turn off BC application temporarily
 
-    bcs = ls.A.bcs
-    ls.A.bcs = None
+    bcs = ls.bcs
     
     rhs_working = rhs.copy()
-    x = Function(rhs_working.function_space()).vector()
-    ls.solve(x, rhs_working)
-    G.mult(x, rhs_working, reduce = True)
-    ls.solve(x, rhs_working)
+    x = Function(rhs_working.function_space).vector
+    ls.solve() #TODO: Find a better way of assembling A without bcs
+    x_temp1 = solve_linear_solver(ls.A.copy(), x.copy(), rhs_working.vector)
+    G.mult(x_temp1, rhs_working.vector, reduce = True)
+    x_temp2 = solve_linear_solver(ls.A.copy(), x_temp1, rhs_working.vector)
 
     # turn BCs back on
 
-    ls.A.bcs = bcs
-    
-    return x.copy()
+    ls.bcs = bcs
+
+    return x_temp2.copy()
 
 def interp_covariance_to_data(im_left, G, ls, im_right, ensemble_comm=MPI.COMM_SELF):
     """
@@ -103,8 +113,8 @@ def interp_covariance_to_data(im_left, G, ls, im_right, ensemble_comm=MPI.COMM_S
 
     if not isinstance(im_left, InterpolationMatrix):
         raise TypeError("first argument to interp_covariance_to_data must be an InterpolationMatrix")
-    if not isinstance(ls, LinearProblem):
-        raise TypeError("ls must be a firedrake LinearSolver")
+    # if not isinstance(ls, LinearProblem):
+    #     raise TypeError("ls must be a firedrake LinearSolver")
     if not isinstance(G, ForcingCovariance):
         raise TypeError("G must be a ForcingCovariance class")
     if not isinstance(im_right, InterpolationMatrix):
