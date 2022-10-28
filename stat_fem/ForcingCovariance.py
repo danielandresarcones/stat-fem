@@ -147,10 +147,12 @@ class ForcingCovariance(object):
         G_dict = {}
         nnz = 0
         try:
-            int_basis = self._integrate_basis_functions(self.function_space.sub(0))
+            int_basis = self._integrate_basis_functions(self.function_space.sub(0)) #Only works with first order polynomials
         except AssertionError:                                                      #TODO: THIS IS EXTREMELY DANGEROUS!!!!
             int_basis = self._integrate_basis_functions(self.function_space)
-
+        int_basis_list = []
+        for dim in range(len(self.sigma)):
+            int_basis_list.append([int_basis[i] for i in range(dim,len(int_basis),len(self.sigma))])
         mesh = self.function_space.mesh
         if isinstance(self.function_space.ufl_element(), VectorElement):
             W = self.function_space
@@ -166,10 +168,9 @@ class ForcingCovariance(object):
         #     meshvals = np.reshape(meshvals, (-1, 1))
         # assert meshvals.shape[0] == self.nx_local, "error in gathering mesh coordinates"
 
-        for i in range(self.local_startind, self.local_endind):
+        for i in range(self.local_startind, int(self.local_endind/len(self.sigma))):
             for j in range(len(self.sigma)):
-                row = (int_basis[i]*int_basis*
-                    self.cov(meshvals[i], meshvals, self.sigma[j], self.l[j]))[0]
+                row = (int_basis_list[j][i] * self.cov(meshvals[i], meshvals, self.sigma[j], self.l[j]) * int_basis_list[j][i].T)[0]
                 row[i] += self.regularization
                 above_cutoff = (row/row[i] > self.cutoff)
                 G_dict[j + i*len(self.sigma)] = (row[above_cutoff], np.arange(j, self.nx, len(self.sigma), dtype=PETSc.IntType)[above_cutoff])

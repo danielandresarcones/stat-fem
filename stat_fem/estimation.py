@@ -118,7 +118,7 @@ def estimate_params_MAP(problem, G, data, priors=[None, None, None], start=None,
 
     return ls
 
-def estimate_params_MCMC(A, b, G, data, priors=[None, None, None], start=None, 
+def estimate_params_MCMC(problem, G, data, priors=[None, None, None], start=None, 
                         n_walkers = 10, n_samples = 20000, n_burn_in = 2000, ensemble_comm=MPI.COMM_SELF,
                         parameter_limits = [[-5,5],[-10,2],[-10,2]], 
                         output_index_dimensions = [], stabilise = False, progress = False, **kwargs):
@@ -201,7 +201,7 @@ def estimate_params_MCMC(A, b, G, data, priors=[None, None, None], start=None,
 
     p0 = np.random.rand(n_walkers, 3)
 
-    ls = LinearSolver(A, b, G, data, priors=priors, ensemble_comm=ensemble_comm,
+    ls = LinearSolver(problem, G, data, priors=priors, ensemble_comm=ensemble_comm,
                       **ls_kwargs, out_dim = out_dim, stabilise = stabilise)
 
     ls.solve_prior()

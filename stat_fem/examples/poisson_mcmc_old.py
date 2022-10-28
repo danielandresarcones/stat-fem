@@ -1,15 +1,9 @@
 import numpy as np
-from ufl import TrialFunction, TestFunction
-from ufl import SpatialCoordinate, dx, pi, sin, dot, grad
-import dolfinx.fem
-from dolfinx.fem.petsc import PETSc
-from dolfinx.fem import FunctionSpace, Function, dirichletbc
-from petsc4py.PETSc import ScalarType
-import sys
-sys.path.append("/home/darcones/firedrake/stat-fem")
+from firedrake import UnitSquareMesh, FunctionSpace, TrialFunction, TestFunction
+from firedrake import SpatialCoordinate, dx, pi, sin, dot, grad, DirichletBC
+from firedrake import assemble, Function, solve
 import stat_fem
 from stat_fem.covariance_functions import sqexp
-from mpi4py import MPI
 try:
     import matplotlib.pyplot as plt
     makeplots = True
@@ -20,47 +14,35 @@ except ImportError:
 
 nx = 101
 
-mesh = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, nx - 1, nx - 1)
-V = FunctionSpace(mesh, ("CG", 1))
+mesh = UnitSquareMesh(nx - 1, nx - 1)
+V = FunctionSpace(mesh, "CG", 1)
 
 u = TrialFunction(V)
 v = TestFunction(V)
 
 f = Function(V)
 x = SpatialCoordinate(mesh)
-f = (8*pi*pi)*sin(x[0]*pi*2)*sin(x[1]*pi*2)
+f.interpolate((8*pi*pi)*sin(x[0]*pi*2)*sin(x[1]*pi*2))
 
-a = dolfinx.fem.form((dot(grad(v), grad(u))) * dx)
-L = dolfinx.fem.form(f * v * dx)
+a = (dot(grad(v), grad(u))) * dx
+L = f * v * dx
 
-facets = dolfinx.mesh.locate_entities_boundary(mesh, dim=1,
-                                       marker=lambda x: np.logical_or.reduce((np.isclose(x[0], 0.0),
-                                                                              np.isclose(x[0], 1.0),
-                                                                              np.isclose(x[1], 0.0),
-                                                                              np.isclose(x[1], 1.0))))
-dofs = dolfinx.fem.locate_dofs_topological(V=V, entity_dim=1, entities=facets)
-bc = dirichletbc(value=ScalarType(0), dofs=dofs, V=V)
+bc = DirichletBC(V, 0., "on_boundary")
 
-A = dolfinx.fem.petsc.assemble_matrix(a, bcs = [bc])
-A.assemble()
+A = assemble(a, bcs = bc)
 
-b = dolfinx.fem.petsc.assemble_vector(L)
-dolfinx.fem.petsc.apply_lifting(b, [a], bcs=[[bc]])
-b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
-dolfinx.fem.petsc.set_bc(b, [bc])
+b = assemble(L)
 
 u = Function(V)
 
-problem = dolfinx.fem.petsc.LinearProblem(a, L, u=u, bcs=[bc], petsc_options={"ksp_type": "preonly", "pc_type": "lu"})
-u = problem.solve()
-
+solve(A, u, b)
 
 # Create some fake data that is systematically different from the FEM solution.
 # note that all parameters are on a log scale, so we take the true values
 # and take the logarithm
 
 # forcing covariance parameters (taken to be known)
-sigma_f = np.log(2.e-2)
+sigma_f = 0.0
 l_f = np.log(0.354)
 
 # model discrepancy parameters (need to be estimated)
@@ -93,8 +75,8 @@ y = (np.exp(rho)*np.sin(2.*np.pi*x_data[:,0])*np.sin(2.*np.pi*x_data[:,1]) +
 
 if makeplots:
     plt.figure()
-    plt.tripcolor(mesh.geometry.x[:,0], mesh.geometry.x[:,1],
-                  u.vector)
+    plt.tripcolor(mesh.coordinates.vector().dat.data[:,0], mesh.coordinates.vector().dat.data[:,1],
+                  u.vector().dat.data)
     plt.colorbar()
     plt.scatter(x_data[:,0], x_data[:,1], c = y, cmap="Greys_r")
     plt.colorbar()
@@ -116,7 +98,7 @@ obs_data = stat_fem.ObsData(x_data, y, sigma_y)
 # Should get a good estimate of these values for this example problem (if not, you
 # were unlucky with random sampling!)
 
-ls, samples = stat_fem.estimate_params_MCMC(problem, G, obs_data)
+ls, samples = stat_fem.estimate_params_MCMC(A, b, G, obs_data)
 
 print("MLE parameter estimates:")
 print(ls.params)
@@ -158,8 +140,8 @@ muy2, Cuy = ls.solve_posterior_covariance()
 
 if makeplots:
     plt.figure()
-    plt.tripcolor(mesh.geometry.x[:,0], mesh.geometry.x[:,1],
-                  muy.vector)
+    plt.tripcolor(mesh.coordinates.vector().dat.data[:,0], mesh.coordinates.vector().dat.data[:,1],
+                  muy.vector().dat.data)
     plt.colorbar()
     plt.scatter(x_data[:,0], x_data[:,1], c = np.diag(Cuy), cmap="Greys_r")
     plt.colorbar()

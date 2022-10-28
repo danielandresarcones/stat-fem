@@ -1,9 +1,19 @@
 import numpy as np
 import ufl
+import sys
+sys.path.append("/home/darcones/firedrake/stat-fem")
+import dolfinx
+from dolfinx.fem import Function, FunctionSpace, Constant, dirichletbc
+import ufl
+from ufl import TrialFunction, TestFunction
+from ufl import SpatialCoordinate, dx, pi, sin, dot, grad, inner
+from petsc4py.PETSc import ScalarType
+from dolfinx.fem.petsc import PETSc
+from mpi4py import MPI
+
 import stat_fem
 from stat_fem.covariance_functions import sqexp
 import matplotlib.pyplot as plt
-from firedrake import *
 try:
     import matplotlib.pyplot as plt
     makeplots = True
@@ -26,30 +36,37 @@ lambda_f = beta
 g = gamma
 
 
-mesh = RectangleMesh(nx-1, nx-1, length, width)
+mesh = dolfinx.mesh.create_rectangle(comm = MPI.COMM_WORLD, points = [np.array([0.0,0.0]), np.array([length, width])], n=[nx-1, nx-1])
 
-V = FunctionSpace(mesh, "CG", 1)
-rho_g_f = Constant(rho_g)
-g_f = Constant(g)
+V = FunctionSpace(mesh, ("CG", 1))
 
 u = TrialFunction(V)
 v = TestFunction(V)
 
 f = Function(V)
 x = SpatialCoordinate(mesh)
-f = Constant(-rho_g_f*g_f)
-mu = Constant(mu_f)
-lambda_ = Constant(lambda_f)
-a = (inner((2*mu+lambda_)*grad(u), 0.01*grad(v))) * dx
-L = f * v * dx
+f = -rho_g*g
+a = dolfinx.fem.form((inner((2*mu_f+lambda_f)*grad(u), grad(v))) * dx)
+L = dolfinx.fem.form(f * v * dx)
 
-bc = DirichletBC(V, 0., 1)
+facets = dolfinx.mesh.locate_entities_boundary(mesh, dim=1,
+                                       marker=lambda x:np.isclose(x[0], 0.0))
+dofs = dolfinx.fem.locate_dofs_topological(V=V, entity_dim=1, entities=facets)
 
-A = assemble(a, bcs = bc)
+bc = dirichletbc(value=ScalarType(0), dofs=dofs, V=V)
 
-b = assemble(L)
+A = dolfinx.fem.petsc.assemble_matrix(a, bcs = [bc])
+A.assemble()
+
+b = dolfinx.fem.petsc.assemble_vector(L)
+dolfinx.fem.petsc.apply_lifting(b, [a], bcs=[[bc]])
+b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
+dolfinx.fem.petsc.set_bc(b, [bc])
 
 u = Function(V)
+
+problem = dolfinx.fem.petsc.LinearProblem(a, L, u=u, bcs=[bc], petsc_options={"ksp_type": "preonly", "pc_type": "lu"})
+u = problem.solve()
 
 # options={"ksp_type": "cg", 
 #         "ksp_max_it": 100, 
@@ -58,7 +75,6 @@ u = Function(V)
 #         "ksp_converged_reason": None}
 
 # solve(A, u, b, solver_parameters = options)
-solve(A, u, b)
 
 # Create some fake data that is systematically different from the FEM solution.
 # note that all parameters are on a log scale, so we take the true values
@@ -103,8 +119,8 @@ y = ( z_mean +
 
 if makeplots:
     plt.figure()
-    plt.tripcolor(mesh.coordinates.vector().dat.data[:,0], mesh.coordinates.vector().dat.data[:,1],
-                  u.vector().dat.data)
+    plt.tripcolor(mesh.geometry.x[:,0], mesh.geometry.x[:,1],
+                  u.vector)
     plt.colorbar(label="Displacement prior",pad=0.1)
     plt.scatter(x_data[:,0], x_data[:,1], c = y, cmap="Greys_r")
     plt.colorbar(label="Displacement data")
@@ -128,7 +144,7 @@ obs_data = stat_fem.ObsData(x_data, y, sigma_y)
 
 parameter_limits = [[-1,5],[-10,2],[-10,2]]
 
-ls, samples = stat_fem.estimate_params_MCMC(A, b, G, obs_data, stabilise = False, parameter_limits=parameter_limits)
+ls, samples = stat_fem.estimate_params_MCMC(problem, G, obs_data, stabilise = False, parameter_limits=parameter_limits)
 
 print("MLE parameter estimates:")
 print(ls.params)
@@ -186,8 +202,8 @@ mu_z2, Cu_z2 = ls.solve_posterior_real()
 
 if makeplots:
     plt.figure()
-    plt.tripcolor(mesh.coordinates.vector().dat.data[:,0], mesh.coordinates.vector().dat.data[:,1],
-                  muy.vector().dat.data)
+    plt.tripcolor(mesh.geometry.x[:,0], mesh.geometry.x[:,1],
+                  muy.vector)
     plt.colorbar(label="Displacement posterior",pad=0.1)
     plt.scatter(x_data[:,0], x_data[:,1], c = np.diag(Cuy), cmap="Greys_r")
     plt.colorbar(label="Covariance $C_{u|y}$ at y")

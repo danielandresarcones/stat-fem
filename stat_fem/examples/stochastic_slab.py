@@ -1,12 +1,14 @@
 import numpy as np
+import sys
+sys.path.append("/home/darcones/firedrake/stat-fem")
 import stat_fem
 from stat_fem.covariance_functions import sqexp
 import matplotlib.pyplot as plt
-from firedrake import *
+# from firedrake import *
 from types import MethodType
-import sys
 sys.path.append("/home/darcones/FenicsConcrete")
 import fenicsX_concrete
+from dolfinx.fem import Function
 
 try:
     import matplotlib.pyplot as plt
@@ -74,9 +76,9 @@ for i in range(datagrid_x):
 #print(sensor.name)
 experiment, problem = simple_setup(p, sensors)
 
-y = [sensor.data[-1] for sensor in problem.sensors]
+y = [sensor.data[-1] for sensor_name,sensor in problem.sensors.items()]
 V = experiment.V
-A = assemble(problem.a, bcs = experiment.bcs)
+# A = assemble(problem.a, bcs = experiment.bcs)
 
 # Simplify field to be deterministic
 def simple_lambda_(self): #Lame's constant
@@ -85,7 +87,7 @@ def simple_lambda_(self): #Lame's constant
 def simple_mu(self):     #Lame's constant
     return self.p.E.mean/(2*(1+self.p.nu.mean))
 
-problem.lambda_ = MethodType(simple_lambda, problem)
+problem.lambda_ = MethodType(simple_lambda_, problem)
 problem.mu = MethodType(simple_mu, problem)
 b = problem.L
 
@@ -103,14 +105,14 @@ sigma_eta = np.log(0.0225/2)
 l_eta = np.log(0.5)
 
 # data statistical errors (taken to be known)
-sigma_y = sqrt(2.5e-5)
+sigma_y = np.sqrt(2.5e-5)
 ndata = nx
 
 # Begin stat-fem solution
 
 # Compute and assemble forcing covariance matrix using known correlated errors in forcing
 
-G = stat_fem.ForcingCovariance(V, [sigma_f], [l_f])
+G = stat_fem.ForcingCovariance(V, [sigma_f, sigma_f], [l_f, l_f])
 G.assemble()
 
 # combine data into an observational data object using known locations, observations,
@@ -123,7 +125,7 @@ obs_data = stat_fem.ObsData(x_data, y, sigma_y)
 # were unlucky with random sampling!)
 
 # ls = stat_fem.estimate_params_MAP(A, b, G, obs_data)
-ls, samples = stat_fem.estimate_params_MCMC(A, b, G, obs_data, stabilise = True)
+ls, samples = stat_fem.estimate_params_MCMC(problem, G, obs_data, stabilise = True)
 
 print("Parameter estimates:")
 print(ls.params)
@@ -159,8 +161,8 @@ if makeplots:
     plt.figure()
     plt.plot(x_data[:,0],mu,'o-',markersize = 2,label = "u")
     plt.fill_between(x_data[:,0],mu+1.96*np.diag(Cu), mu-1.96*np.diag(Cu), label = "u 95 confidence",alpha = 0.5)
-    plt.plot(x_data,z_mean, '+-', label = "True z")
-    plt.fill_between(x_data[:,0],z_mean+1.96*np.sqrt(np.diag(z_cov)),z_mean-1.96*np.sqrt(np.diag(z_cov)), label = "True z 95 confidence", alpha = 0.5)
+    # plt.plot(x_data,z_mean, '+-', label = "True z")
+    # plt.fill_between(x_data[:,0],z_mean+1.96*np.sqrt(np.diag(z_cov)),z_mean-1.96*np.sqrt(np.diag(z_cov)), label = "True z 95 confidence", alpha = 0.5)
     plt.plot(x_data,y, '+', label = "data")
     plt.xlabel("x [m]")
     plt.ylabel("y")
