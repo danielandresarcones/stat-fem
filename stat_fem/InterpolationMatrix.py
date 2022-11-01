@@ -5,6 +5,7 @@ from dolfinx.fem import Function
 from dolfinx.fem.petsc import PETSc
 from dolfinx.fem import VectorFunctionSpace
 from dolfinx.geometry import (BoundingBoxTree, compute_colliding_cells, compute_collisions)
+import dolfinx
 # from firedrake.functionspaceimpl import WithGeometry
 # from firedrake.interpolation import interpolate
 # from firedrake.vector import Vector
@@ -130,12 +131,19 @@ class InterpolationMatrix(object):
 
         # loop over all data points
 
+        tree = BoundingBoxTree(self.function_space.mesh, self.function_space.mesh.geometry.dim)
+        coords = np.pad(self.coords, ((0,0),(0,len(meshvals_local[0])-len(self.coords[0]))),'constant', constant_values = 0.0)
+
         for i in range(self.n_data_local):
-            tree = BoundingBoxTree(self.function_space.mesh, self.function_space.mesh.geometry.dim)
             cell_candidates = compute_collisions(tree, self.coords[i])
-            cell = compute_colliding_cells(self.function_space.mesh, cell_candidates, self.coords[i])[0]
-            # cell = self.function_space.mesh.locate_cell(self.coords[i])
-            coords = np.pad(self.coords, ((0,0),(0,1)),'constant', constant_values = 0.0)
+            try:
+                cell = compute_colliding_cells(self.function_space.mesh, cell_candidates, self.coords[i])[0]
+            except TypeError: #TODO: THIS IS DANGEROUS
+                # cell = self.function_space.mesh.locate_cell(self.coords[i])
+                cell = compute_colliding_cells(self.function_space.mesh, cell_candidates, self.coords[i])
+            
+            if isinstance(cell, dolfinx.cpp.graph.AdjacencyList_int32): # This shouldn't be necessary, but collisions behave differently by dimensions
+                cell = cell.array[0]
             if not cell is None:
                 nodes = self.function_space.dofmap.cell_dofs(cell)
                 points = meshvals_local[nodes]

@@ -1,8 +1,16 @@
 import numpy as np
+from ufl import TrialFunction, TestFunction
+from ufl import SpatialCoordinate, dx, pi, sin, dot, grad
+import dolfinx.fem
+from dolfinx.fem.petsc import PETSc
+from dolfinx.fem import FunctionSpace, Function, dirichletbc
+from petsc4py.PETSc import ScalarType
+import sys
+
+sys.path.append("/home/darcones/firedrake/stat-fem")
 import stat_fem
 from stat_fem.covariance_functions import sqexp
-import matplotlib.pyplot as plt
-from firedrake import *
+from mpi4py import MPI
 try:
     import matplotlib.pyplot as plt
     makeplots = True
@@ -10,35 +18,59 @@ except ImportError:
     makeplots = False
 
 # Set up base FEM, which solves Poisson's equation on a square mesh
+class ExperimentPoisson1D:
 
-makeplots = True
+    def __init__(self, nx) -> None:
+        
+        self.nx = nx
+
+        self.mesh = dolfinx.mesh.create_unit_interval(MPI.COMM_WORLD, nx - 1)
+        self.V = FunctionSpace(self.mesh, ("CG", 1))
+
+        dim = self.mesh.topology.dim - 1
+
+        facets = dolfinx.mesh.locate_entities_boundary(self.mesh, dim=dim,
+                                            marker=lambda x: np.logical_or(np.isclose(x[0], 0.0),
+                                                                            np.isclose(x[0], 1.0)))
+        dofs = dolfinx.fem.locate_dofs_topological(V=self.V, entity_dim=dim, entities=facets)
+        self.bcs = dirichletbc(value=ScalarType(0), dofs=dofs, V=self.V)
+
+class ProblemPoisson:
+
+    def __init__(self, experiment, force) -> None:
+
+        u = TrialFunction(experiment.V)
+        v = TestFunction(experiment.V)
+
+        f = Function(experiment.V)
+        x = SpatialCoordinate(experiment.mesh)
+        f = force
+
+        self.a = dolfinx.fem.form((dot(grad(v), grad(u))) * dx)
+        self.L = dolfinx.fem.form(f * v * dx)
+        self.bcs = experiment.bcs
+        self.A = dolfinx.fem.petsc.assemble_matrix(self.a, bcs = [experiment.bcs])
+        self.A.assemble()
+
+        self.b = dolfinx.fem.petsc.assemble_vector(self.L)
+        dolfinx.fem.petsc.apply_lifting(self.b, [self.a], bcs=[[experiment.bcs]])
+        self.b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
+        dolfinx.fem.petsc.set_bc(self.b, [experiment.bcs])
+
+        self.u = Function(experiment.V)
+
+        self.lproblem = dolfinx.fem.petsc.LinearProblem(self.a, self.L, u=self.u, bcs=[experiment.bcs], petsc_options={"ksp_type": "preonly", "pc_type": "lu"})
+        
+    def solve(self):
+        self.u = self.lproblem.solve()
+        return self.u
+
 nx = 33
-# Scaled variable
-mesh = UnitIntervalMesh(nx-1)
-
-V = FunctionSpace(mesh, "CG", 1)
-
-u = TrialFunction(V)
-v = TestFunction(V)
-
 force = np.pi**2/5.0
-f = Constant(force)
-x = SpatialCoordinate(mesh)
 
-a = dot(grad(v), grad(u)) * dx
-L = f * v * dx
-
-bc_1 = DirichletBC(V, 0., 1)
-bc_2 = DirichletBC(V, 0., 2)
-
-A = assemble(a, bcs = [bc_1, bc_2])
-
-b = assemble(L)
-
-u = Function(V)
-
-solve(A, u, b)
-
+experiment = ExperimentPoisson1D(nx)
+problem = ProblemPoisson(experiment, force)
+problem.solve()
 
 # Create some fake data that is systematically different from the FEM solution.
 # note that all parameters are on a log scale, so we take the true values
@@ -54,8 +86,19 @@ sigma_eta = np.log(0.0225/2)
 l_eta = np.log(0.5)
 
 # data statistical errors (taken to be known)
-sigma_y = sqrt(2.5e-5)
+sigma_y = np.sqrt(2.5e-5)
 ndata = nx
+
+# statfem parameters
+statfem_param = dict()
+statfem_param['sigma_f'] = [sigma_f]
+statfem_param['l_f'] = [l_f]
+statfem_param['true_rho'] = rho
+statfem_param['true_sigma_eta'] = sigma_eta
+statfem_param['true_l_eta'] = l_eta
+statfem_param['sigma_y'] = sigma_y
+statfem_param['inference_mode'] = 'MCMC'
+statfem_param['stabilise'] = True
 
 # create fake data on a grid
 x_data = np.zeros((ndata,1))
@@ -75,90 +118,5 @@ y = (z + np.random.normal(scale = sigma_y, size = ndata))
 # visualize the prior FEM solution and the synthetic data
 
 
-# Begin stat-fem solution
-
-# Compute and assemble forcing covariance matrix using known correlated errors in forcing
-
-G = stat_fem.ForcingCovariance(V, [sigma_f], [l_f])
-G.assemble()
-
-# combine data into an observational data object using known locations, observations,
-# and known statistical errors
-
-obs_data = stat_fem.ObsData(x_data, y, sigma_y)
-
-# Use MLE (MAP with uninformative prior information) to estimate discrepancy parameters
-# Should get a good estimate of these values for this example problem (if not, you
-# were unlucky with random sampling!)
-
-# ls = stat_fem.estimate_params_MAP(A, b, G, obs_data)
-ls, samples = stat_fem.estimate_params_MCMC(A, b, G, obs_data, stabilise = True)
-
-print("Parameter estimates:")
-print(ls.params)
-print("Actual input parameters:")
-true_values = np.array([rho, sigma_eta, l_eta])
-print(true_values)
-
-if makeplots:
-    figure, axes = plt.subplots(3)
-    figure.suptitle("MCMC 20000 samples")
-    names = [r"$\rho$",r"$\sigma_d$",r"$l_d$"]
-    p_names = [r"$p(\rho)$",r"$p(\sigma_d$)",r"p($l_d$)"]
-    ranges =  [[0,1.5],[0,0.3],[0,0.2]]
-    for i in range(3):
-        axes[i].hist(np.exp(samples[:, i]), 100, range = ranges[i] ,color='k', histtype="step")
-        axes[i].set(xlabel = names[i], ylabel = p_names[i])
-        axes[i].axvline(x=np.exp(ls.params[i]), c='b',linestyle = '-', label = "Estimate")
-        axes[i].axvline(x=np.exp(true_values[i]), c='r',linestyle = '--', label = "True")
-        axes[i].legend()
-    axes[2].set(xlim = (-0.3,0.6))
-
-
-# Estimation function returns a re-usable LinearSolver object, which we can use to compute the
-# posterior FEM solution conditioned on the data
-
-# solve for posterior FEM solution conditioned on data
-mu, Cu = ls.solve_prior()
-mu_f, Cu_f = ls.solve_prior_generating()
-muy = Function(V)
-
-# plot priors 
-if makeplots:
-    plt.figure()
-    plt.plot(x_data[:,0],mu,'o-',markersize = 2,label = "u")
-    plt.fill_between(x_data[:,0],mu+1.96*np.diag(Cu), mu-1.96*np.diag(Cu), label = "u 95 confidence",alpha = 0.5)
-    plt.plot(x_data,z_mean, '+-', label = "True z")
-    plt.fill_between(x_data[:,0],z_mean+1.96*np.sqrt(np.diag(z_cov)),z_mean-1.96*np.sqrt(np.diag(z_cov)), label = "True z 95 confidence", alpha = 0.5)
-    plt.plot(x_data,y, '+', label = "data")
-    plt.xlabel("x [m]")
-    plt.ylabel("y")
-    plt.legend()
-    plt.title("Prior solutions")
-
-# solve_posterior computes the full solution on the FEM grid using a Firedrake function
-# the scale_mean option will ensure that the output is scaled to match
-# the data rather than the FEM soltuion
-
-ls.solve_posterior(muy, scale_mean=True)
-
-# covariance can only be computed for a select number of locations as covariance is a dense matrix
-# function returns the mean/covariance as numpy arrays, not Firedrake functions
-
-muy2, Cuy = ls.solve_posterior_covariance(scale_mean = True)
-mu_z2, Cu_z2 = ls.solve_posterior_real()
-
-# visualize posterior FEM solution and uncertainty
-
-if makeplots:
-    plt.figure()
-    plt.plot(x_data[:,0],muy2,'o-',markersize = 0, label = "u posterior scaled")
-    plt.fill_between(x_data[:,0],muy2+1.96*np.sqrt(np.diag(Cuy)), muy2-1.96*np.sqrt(np.diag(Cuy)), label = "u scaled 95 confidence", alpha = 0.5)
-    plt.plot(x_data[:,0],mu_z2,'o-',markersize = 2,label = "y from FEM (z+noise) posterior")
-    plt.fill_between(x_data[:,0],mu_z2+1.96*np.sqrt(np.diag(Cu_z2)), mu_z2-1.96*np.sqrt(np.diag(Cu_z2)), label = "y from FEM (z+noise) 95 confidence", alpha = 0.5)
-    plt.plot(x_data,y, '+', label = "data")
-    plt.title("Posterior solutions")
-    plt.xlabel("x [m]")
-    plt.ylabel("y")
-    plt.legend()
-    plt.show()
+statfem_problem = stat_fem.StatFEMProblem(problem, experiment, x_data, y, parameters=statfem_param)
+statfem_problem.solve()
