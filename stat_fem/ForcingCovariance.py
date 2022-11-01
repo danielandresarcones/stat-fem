@@ -170,7 +170,7 @@ class ForcingCovariance(object):
 
         for i in range(self.local_startind, int(self.local_endind/len(self.sigma))):
             for j in range(len(self.sigma)):
-                row = (int_basis_list[j][i] * self.cov(meshvals[i], meshvals, self.sigma[j], self.l[j]) * int_basis_list[j][i].T)[0]
+                row = (int_basis_list[j][i]* np.array(int_basis_list[j]) * self.cov(meshvals[i], meshvals, self.sigma[j], self.l[j]) )[0]
                 row[i] += self.regularization
                 above_cutoff = (row/row[i] > self.cutoff)
                 G_dict[j + i*len(self.sigma)] = (row[above_cutoff], np.arange(j, self.nx, len(self.sigma), dtype=PETSc.IntType)[above_cutoff])

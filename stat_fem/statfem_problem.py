@@ -116,7 +116,7 @@ class StatFEMProblem:
         # covariance can only be computed for a select number of locations as covariance is a dense matrix
         # function returns the mean/covariance as numpy arrays, not Firedrake functions
 
-        muy2, Cuy = self.ls.solve_posterior_covariance()
+        muy2, Cuy = self.ls.solve_posterior_covariance(scale_mean=True)
         mu_z2, Cu_z2 = self.ls.solve_posterior_real()
 
         # visualize posterior FEM solution and uncertainty
