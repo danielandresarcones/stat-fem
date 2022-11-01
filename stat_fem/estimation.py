@@ -98,7 +98,7 @@ def estimate_params_MAP(problem, G, data, priors=[None, None, None], start=None,
     else:
         assert np.array(start).shape == (3,), "bad shape for starting point"
 
-    fmin_dict = minimize(ls.logposterior, start, method='L-BFGS-B',
+    fmin_dict = minimize(ls.logposterior, start, method='Newton-CG',
                          jac=ls.logpost_deriv, options=minimize_kwargs)
 
     assert fmin_dict['success'], "minimization routine failed"
