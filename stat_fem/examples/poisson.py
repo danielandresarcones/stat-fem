@@ -6,6 +6,7 @@ from dolfinx.fem.petsc import PETSc
 from dolfinx.fem import FunctionSpace, Function, dirichletbc
 from petsc4py.PETSc import ScalarType
 import sys
+
 sys.path.append("/home/darcones/firedrake/stat-fem")
 import stat_fem
 from stat_fem.covariance_functions import sqexp
@@ -18,42 +19,58 @@ except ImportError:
 
 # Set up base FEM, which solves Poisson's equation on a square mesh
 
-nx = 101
+class ExperimentPoisson:
 
-mesh = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, nx - 1, nx - 1)
-V = FunctionSpace(mesh, ("CG", 1))
+    def __init__(self) -> None:
+        
+        nx = 101
 
-u = TrialFunction(V)
-v = TestFunction(V)
+        self.mesh = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, nx - 1, nx - 1)
+        self.V = FunctionSpace(self.mesh, ("CG", 1))
 
-f = Function(V)
-x = SpatialCoordinate(mesh)
-f = (8*pi*pi)*sin(x[0]*pi*2)*sin(x[1]*pi*2)
+        
 
-a = dolfinx.fem.form((dot(grad(v), grad(u))) * dx)
-L = dolfinx.fem.form(f * v * dx)
+        facets = dolfinx.mesh.locate_entities_boundary(self.mesh, dim=1,
+                                            marker=lambda x: np.logical_or.reduce((np.isclose(x[0], 0.0),
+                                                                                    np.isclose(x[0], 1.0),
+                                                                                    np.isclose(x[1], 0.0),
+                                                                                    np.isclose(x[1], 1.0))))
+        dofs = dolfinx.fem.locate_dofs_topological(V=self.V, entity_dim=1, entities=facets)
+        self.bcs = dirichletbc(value=ScalarType(0), dofs=dofs, V=self.V)
 
-facets = dolfinx.mesh.locate_entities_boundary(mesh, dim=1,
-                                       marker=lambda x: np.logical_or.reduce((np.isclose(x[0], 0.0),
-                                                                              np.isclose(x[0], 1.0),
-                                                                              np.isclose(x[1], 0.0),
-                                                                              np.isclose(x[1], 1.0))))
-dofs = dolfinx.fem.locate_dofs_topological(V=V, entity_dim=1, entities=facets)
-bc = dirichletbc(value=ScalarType(0), dofs=dofs, V=V)
+class ProblemPoisson:
 
-A = dolfinx.fem.petsc.assemble_matrix(a, bcs = [bc])
-A.assemble()
+    def __init__(self, experiment) -> None:
 
-b = dolfinx.fem.petsc.assemble_vector(L)
-dolfinx.fem.petsc.apply_lifting(b, [a], bcs=[[bc]])
-b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
-dolfinx.fem.petsc.set_bc(b, [bc])
+        u = TrialFunction(experiment.V)
+        v = TestFunction(experiment.V)
 
-u = Function(V)
+        f = Function(experiment.V)
+        x = SpatialCoordinate(experiment.mesh)
+        f = (8*pi*pi)*sin(x[0]*pi*2)*sin(x[1]*pi*2)
 
-problem = dolfinx.fem.petsc.LinearProblem(a, L, u=u, bcs=[bc], petsc_options={"ksp_type": "preonly", "pc_type": "lu"})
-u = problem.solve()
+        self.a = dolfinx.fem.form((dot(grad(v), grad(u))) * dx)
+        self.L = dolfinx.fem.form(f * v * dx)
+        self.bcs = experiment.bcs
+        self.A = dolfinx.fem.petsc.assemble_matrix(self.a, bcs = [experiment.bcs])
+        self.A.assemble()
 
+        self.b = dolfinx.fem.petsc.assemble_vector(self.L)
+        dolfinx.fem.petsc.apply_lifting(self.b, [self.a], bcs=[[experiment.bcs]])
+        self.b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
+        dolfinx.fem.petsc.set_bc(self.b, [experiment.bcs])
+
+        self.u = Function(experiment.V)
+
+        self.lproblem = dolfinx.fem.petsc.LinearProblem(self.a, self.L, u=self.u, bcs=[experiment.bcs], petsc_options={"ksp_type": "preonly", "pc_type": "lu"})
+        
+    def solve(self):
+        self.u = self.lproblem.solve()
+        return self.u
+
+experiment = ExperimentPoisson()
+problem = ProblemPoisson(experiment)
+problem.solve()
 
 # Create some fake data that is systematically different from the FEM solution.
 # note that all parameters are on a log scale, so we take the true values
@@ -63,7 +80,7 @@ u = problem.solve()
 sigma_f = np.log(2.e-2)
 l_f = np.log(0.354)
 
-# model discrepancy parameters (need to be estimated)
+# true model discrepancy parameters (need to be estimated)
 rho = np.log(0.7)
 sigma_eta = np.log(1.e-2)
 l_eta = np.log(0.5)
@@ -72,6 +89,17 @@ l_eta = np.log(0.5)
 sigma_y = 2.e-3
 datagrid = 6
 ndata = datagrid**2
+
+# statfem parameters
+statfem_param = dict()
+statfem_param['sigma_f'] = [sigma_f]
+statfem_param['l_f'] = [l_f]
+statfem_param['true_rho'] = rho
+statfem_param['true_sigma_eta'] = sigma_eta
+statfem_param['true_l_eta'] = l_eta
+statfem_param['sigma_y'] = sigma_y
+statfem_param['inference_mode'] = 'MAP'
+statfem_param['stabilise'] = False
 
 # create fake data on a grid
 x_data = np.zeros((ndata, 2))
@@ -89,66 +117,5 @@ y = (np.exp(rho)*np.sin(2.*np.pi*x_data[:,0])*np.sin(2.*np.pi*x_data[:,1]) +
      np.random.multivariate_normal(mean = np.zeros(ndata), cov = sqexp(x_data, x_data, sigma_eta, l_eta)) +
      np.random.normal(scale = sigma_y, size = ndata))
 
-# visualize the prior FEM solution and the synthetic data
-
-if makeplots:
-    plt.figure()
-    plt.tripcolor(mesh.geometry.x[:,0], mesh.geometry.x[:,1],
-                  u.vector)
-    plt.colorbar()
-    plt.scatter(x_data[:,0], x_data[:,1], c = y, cmap="Greys_r")
-    plt.colorbar()
-    plt.title("Prior FEM solution and data")
-
-# Begin stat-fem solution
-
-# Compute and assemble forcing covariance matrix using known correlated errors in forcing
-
-G = stat_fem.ForcingCovariance(V, [sigma_f], [l_f])
-G.assemble()
-
-# combine data into an observational data object using known locations, observations,
-# and known statistical errors
-
-obs_data = stat_fem.ObsData(x_data, y, sigma_y)
-
-# Use MLE (MAP with uninformative prior information) to estimate discrepancy parameters
-# Should get a good estimate of these values for this example problem (if not, you
-# were unlucky with random sampling!)
-
-ls = stat_fem.estimate_params_MAP(problem, G, obs_data)
-
-print("MLE parameter estimates:")
-print(ls.params)
-print("Actual input parameters:")
-print(np.array([rho, sigma_eta, l_eta]))
-
-# Estimation function returns a re-usable LinearSolver object, which we can use to compute the
-# posterior FEM solution conditioned on the data
-
-# solve for posterior FEM solution conditioned on data
-
-muy = Function(V)
-
-# solve_posterior computes the full solution on the FEM grid using a Firedrake function
-# the scale_mean option will ensure that the output is scaled to match
-# the data rather than the FEM soltuion
-
-ls.solve_posterior(muy, scale_mean=True)
-
-# covariance can only be computed for a select number of locations as covariance is a dense matrix
-# function returns the mean/covariance as numpy arrays, not Firedrake functions
-
-muy2, Cuy = ls.solve_posterior_covariance()
-
-# visualize posterior FEM solution and uncertainty
-
-if makeplots:
-    plt.figure()
-    plt.tripcolor(mesh.geometry.x[:,0], mesh.geometry.x[:,1],
-                  muy.vector)
-    plt.colorbar()
-    plt.scatter(x_data[:,0], x_data[:,1], c = np.diag(Cuy), cmap="Greys_r")
-    plt.colorbar()
-    plt.title("Posterior FEM solution and uncertainty")
-    plt.show()
+statfem_problem = stat_fem.StatFEMProblem(problem, experiment, x_data, y, parameters=statfem_param)
+statfem_problem.solve()

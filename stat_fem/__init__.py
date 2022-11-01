@@ -7,3 +7,4 @@ from .solving import solve_prior_generating, solve_posterior_generating, solve_p
 from .solving import predict_mean, predict_covariance
 from .estimation import estimate_params_MAP, estimate_params_MCMC
 from .assemble import assemble
+from .statfem_problem import StatFEMProblem
