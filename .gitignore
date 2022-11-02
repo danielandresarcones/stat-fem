@@ -108,3 +108,6 @@ stat_fem/version.py
 stat_fem/test.txt
 stat_fem/output_0.vtu
 stat_fem/output.pvd
+
+*.h5
+*.xdmf
