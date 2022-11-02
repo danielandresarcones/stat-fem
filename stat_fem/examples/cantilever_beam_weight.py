@@ -29,88 +29,112 @@ nx = 101
 length = 1.0
 width = 0.2
 mu_f = 1
-rho_g = 10
+rho_g = 1
 delta = width/length
 gamma = 0.4*delta**2
 beta = 1.25
 lambda_f = beta
 g = gamma
 
+class ExperimentCantileverPoisson:
 
-mesh = dolfinx.mesh.create_rectangle(comm = MPI.COMM_WORLD, points = [np.array([0.0,0.0]), np.array([length, width])], n=[nx-1, nx-1])
+    def __init__(self) -> None:
+        
+        self.mesh = dolfinx.mesh.create_rectangle(comm = MPI.COMM_WORLD, points = [np.array([0.0,0.0]), np.array([length, width])], n=[nx-1, nx-1])
 
-V = VectorFunctionSpace(mesh, ("CG", 1))
+        self.V = VectorFunctionSpace(self.mesh, ("CG", 1))
 
-# Define boundary conditions
-def clamped_boundary(x):
-    return np.isclose(x[0], 0)
+        # Define boundary conditions
+        def clamped_boundary(x):
+            return np.isclose(x[0], 0)
 
-fdim = mesh .topology.dim - 1
-boundary_facets = dolfinx.mesh.locate_entities_boundary(mesh , fdim, clamped_boundary)
+        self.fdim = self.mesh .topology.dim - 1
+        boundary_facets = dolfinx.mesh.locate_entities_boundary(self.mesh , self.fdim, clamped_boundary)
 
-u_D = np.array([0,0], dtype=ScalarType)
-bc = fem.dirichletbc(u_D, fem.locate_dofs_topological(V, fdim, boundary_facets), V)
-
-## Free of traction
-T = fem.Constant(mesh , ScalarType((0, 0)))
-
-## Integration measure
-ds = ufl.Measure("ds", domain =mesh )
+        u_D = np.array([0,0], dtype=ScalarType)
+        self.bcs = fem.dirichletbc(u_D, fem.locate_dofs_topological(self.V, self.fdim, boundary_facets), self.V)
 
 
-# Variational formulation
+class ProblemCantileverPoisson:
 
-def epsilon(u):
-    return ufl.sym(ufl.grad(u)) # Equivalent to 0.5*(ufl.nabla_grad(u) + ufl.nabla_grad(u).T)
-def sigma(u):
-    return lambda_f * ufl.nabla_div(u) * ufl.Identity(u.geometric_dimension()) + 2*mu_f*epsilon(u)
+    def __init__(self, experiment) -> None:
 
-u = ufl.TrialFunction(V)
-v = ufl.TestFunction(V)
-f = fem.Constant(mesh , ScalarType((0, -rho_g*g)))
-a = ufl.inner(sigma(u), epsilon(v)) * ufl.dx
-L = ufl.dot(f, v) * ufl.dx + ufl.dot(T, v) * ds
+        ## Free of traction
+        T = fem.Constant(experiment.mesh , ScalarType((0, 0)))
+
+        ## Integration measure
+        ds = ufl.Measure("ds", domain =experiment.mesh )
 
 
+        # Variational formulation
 
-# A = dolfinx.fem.petsc.assemble_matrix(a, bcs = [bc])
-# A.assemble()
+        def epsilon(u):
+            return ufl.sym(ufl.grad(u)) # Equivalent to 0.5*(ufl.nabla_grad(u) + ufl.nabla_grad(u).T)
+        def sigma(u):
+            return lambda_f * ufl.nabla_div(u) * ufl.Identity(u.geometric_dimension()) + 2*mu_f*epsilon(u)
 
-# b = dolfinx.fem.petsc.assemble_vector(L)
-# dolfinx.fem.petsc.apply_lifting(b, [a], bcs=[[bc]])
-# b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
-# dolfinx.fem.petsc.set_bc(b, [bc])
+        u = ufl.TrialFunction(experiment.V)
+        v = ufl.TestFunction(experiment.V)
+        f = fem.Constant(experiment.mesh , ScalarType((0, -rho_g*g)))
 
-# Solve the problem
-problem = fem.petsc.LinearProblem(a, L, bcs=[bc], petsc_options={"ksp_type": "preonly", "pc_type": "lu"})
-uh = problem.solve()
+        self.a = ufl.inner(sigma(u), epsilon(v)) * ufl.dx
+        self.L = ufl.dot(f, v) * ufl.dx + ufl.dot(T, v) * ds
 
-# options={"ksp_type": "cg", 
-#         "ksp_max_it": 100, 
-#         "pc_type": "gamg",
-#         "mat_type": "aij",
-#         "ksp_converged_reason": None}
+        self.A = dolfinx.fem.petsc.assemble_matrix(fem.form(self.a), bcs = [experiment.bcs])
+        self.A.assemble()
 
-# solve(A, u, b, solver_parameters = options)
+        self.b = dolfinx.fem.petsc.assemble_vector(fem.form(self.L))
+        dolfinx.fem.petsc.apply_lifting(self.b, [fem.form(self.a)], bcs=[[experiment.bcs]])
+        self.b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
+        dolfinx.fem.petsc.set_bc(self.b, [experiment.bcs])
+
+        # Solve the problem
+        self.lproblem = fem.petsc.LinearProblem(self.a, self.L, bcs=[experiment.bcs], petsc_options={"ksp_type": "preonly", "pc_type": "lu"})
+
+    def solve(self):
+
+        # options={"ksp_type": "cg", 
+        #         "ksp_max_it": 100, 
+        #         "pc_type": "gamg",
+        #         "mat_type": "aij",
+        #         "ksp_converged_reason": None}
+
+        self.u = self.lproblem.solve()
+        return self.u
+
+experiment = ExperimentCantileverPoisson()
+problem = ProblemCantileverPoisson(experiment)
+problem.solve()
 
 # Create some fake data that is systematically different from the FEM solution.
 # note that all parameters are on a log scale, so we take the true values
 # and take the logarithm
 
 # forcing covariance parameters (taken to be known)
-sigma_f = np.log(0.00000000001)
-l_f = np.log(3.53)
+sigma_f = np.log(0.0005)
+l_f = np.log(0.353)
 
 # model discrepancy parameters (need to be estimated)
 rho = np.log(0.7)
-sigma_eta = np.log(0.1)
-l_eta = np.log(0.5)
+sigma_eta = np.log(0.005)
+l_eta = np.log(0.05)
 
 # data statistical errors (taken to be known)
-sigma_y = 2.e-3
-datagrid_x = 10
+sigma_y = 2.e-5
+datagrid_x = 25
 datagrid_y = 1
 ndata = datagrid_x*datagrid_y
+
+# statfem parameters
+statfem_param = dict()
+statfem_param['sigma_f'] = [0.0, sigma_f]
+statfem_param['l_f'] = [0.0, l_f]
+statfem_param['true_rho'] = rho
+statfem_param['true_sigma_eta'] = sigma_eta
+statfem_param['true_l_eta'] = l_eta
+statfem_param['sigma_y'] = sigma_y
+statfem_param['inference_mode'] = 'MCMC'
+statfem_param['stabilise'] = True
 
 # create fake data on a grid
 x_data = np.zeros((ndata, 2))
@@ -129,114 +153,52 @@ for i in range(datagrid_x):
 #      np.random.normal(scale = sigma_y, size = ndata))
 z_mean = -gamma * rho_g * np.exp(rho) / (8 * (mu_f*(3*lambda_f+2*mu_f)/(lambda_f+mu_f)) * 0.01 )*(x_data[:,0])**2*(3*length**2+2*length*(length-x_data[:,0])+(length-x_data[:,0])**2)
 z_cov = sqexp(x_data, x_data, sigma_eta, l_eta)
-y = ( z_mean +
+y = np.array( z_mean +
      np.random.multivariate_normal(mean = np.zeros(ndata), cov = z_cov) +
      np.random.normal(scale = sigma_y, size = ndata))
+y = np.pad(np.expand_dims(y, axis=1), ((0,0),(1,0)), 'constant', constant_values=0.0)
 # visualize the prior FEM solution and the synthetic data
-with io.XDMFFile(mesh.comm, "deformation.xdmf", "w") as xdmf:
-    xdmf.write_mesh(mesh)
-    uh.name = "Deformation"
-    xdmf.write_function(uh)
+
+with io.XDMFFile(experiment.mesh.comm, "deformation.xdmf", "w") as xdmf:
+    xdmf.write_mesh(experiment.mesh)
+    problem.u.name = "Deformation prior"
+    xdmf.write_function(problem.u)
     
-if makeplots:
-    plt.figure()
-    plt.tripcolor(mesh.geometry.x[:,0], mesh.geometry.x[:,1],
-                  [uh.vector.array[i] for i in range(1,len(uh.vector.array),2)])
-    plt.colorbar(label="Displacement prior",pad=0.1)
-    plt.scatter(x_data[:,0], x_data[:,1], c = y, cmap="Greys_r")
-    plt.colorbar(label="Displacement data")
-    plt.title("Prior FEM solution and data")
+    statfem_problem = stat_fem.StatFEMProblem(problem, experiment, x_data, y, parameters=statfem_param, makeplots = False)
+    statfem_problem.solve()
 
-# Begin stat-fem solution
-
-# Compute and assemble forcing covariance matrix using known correlated errors in forcing
-
-G = stat_fem.ForcingCovariance(V, [sigma_f,sigma_f], [l_f,l_f])
-G.assemble()
-
-# combine data into an observational data object using known locations, observations,
-# and known statistical errors
-
-obs_data = stat_fem.ObsData(x_data, y, sigma_y)
-
-# Use MLE (MAP with uninformative prior information) to estimate discrepancy parameters
-# Should get a good estimate of these values for this example problem (if not, you
-# were unlucky with random sampling!)
-
-parameter_limits = [[-1,5],[-10,2],[-10,2]]
-
-ls, samples = stat_fem.estimate_params_MCMC(problem, G, obs_data, stabilise = False, parameter_limits=parameter_limits)
-
-print("MLE parameter estimates:")
-print(ls.params)
-print("Actual input parameters:")
-true_values = [rho, sigma_eta, l_eta]
-print(np.array([rho, sigma_eta, l_eta]))
-
-if makeplots:
-    figure, axes = plt.subplots(3)
-    figure.suptitle("MCMC 20000 samples")
-    names = [r"$\rho$",r"$\sigma_d$",r"$l_d$"]
-    p_names = [r"$p(\rho)$",r"$p(\sigma_d$)",r"p($l_d$)"]
-    for i in range(3):
-        axes[i].hist(np.exp(samples[:, i]), 100, color='k', histtype="step")
-        axes[i].set(xlabel = names[i], ylabel = p_names[i])
-        axes[i].axvline(x=np.exp(ls.params[i]), c='b',linestyle = '-', label = "Estimate")
-        axes[i].axvline(x=np.exp(true_values[i]), c='r',linestyle = '--', label = "True")
-        axes[i].legend()
-
-# Estimation function returns a re-usable LinearSolver object, which we can use to compute the
-# posterior FEM solution conditioned on the data
-
-# solve for posterior FEM solution conditioned on data
-
-mu, Cu = ls.solve_prior()
-mu_f, Cu_f = ls.solve_prior_generating()
-muy = Function(V)
+    statfem_problem.muy.name = "Deformation posterior"
+    xdmf.write_function(statfem_problem.muy)
 
 # plot priors 
 if makeplots:
     plt.figure()
-    plt.plot(x_data[:,0],mu,'o-',markersize = 2,label = "u")
-    plt.fill_between(x_data[:,0],mu+1.96*np.diag(Cu), mu-1.96*np.diag(Cu), label = "u 95 confidence",alpha = 0.5)
+    plt.plot(x_data[:,0],statfem_problem.mu[:,1],'o-',markersize = 2,label = "u")
+    plt.fill_between(x_data[:,0],statfem_problem.mu[:,1]+1.96*np.diag(statfem_problem.Cu)[1::2], statfem_problem.mu[:,1]-1.96*np.diag(statfem_problem.Cu)[1::2], label = "u 95 confidence",alpha = 0.5)
     plt.plot(x_data[:,0],z_mean, '+-', label = "True z")
     plt.fill_between(x_data[:,0],z_mean+1.96*np.sqrt(np.diag(z_cov)),z_mean-1.96*np.sqrt(np.diag(z_cov)), label = "True z 95 confidence", alpha = 0.5)
-    plt.plot(x_data[:,0],y, '+', label = "data")
+    plt.plot(x_data[:,0],y[:,1], '+', label = "data")
     plt.xlabel("x [m]")
     plt.ylabel("y")
     plt.legend()
     plt.title("Prior solutions")
 
-# solve_posterior computes the full solution on the FEM grid using a Firedrake function
-# the scale_mean option will ensure that the output is scaled to match
-# the data rather than the FEM soltuion
-
-ls.solve_posterior(muy, scale_mean=True)
-
-# covariance can only be computed for a select number of locations as covariance is a dense matrix
-# function returns the mean/covariance as numpy arrays, not Firedrake functions
-
-muy2, Cuy = ls.solve_posterior_covariance(scale_mean = True)
-mu_z2, Cu_z2 = ls.solve_posterior_real()
-
-# visualize posterior FEM solution and uncertainty
-
 if makeplots:
     plt.figure()
-    plt.tripcolor(mesh.geometry.x[:,0], mesh.geometry.x[:,1],
-                  muy.vector)
+    plt.tripcolor(experiment.mesh.geometry.x[:,0], experiment.mesh.geometry.x[:,1],
+                  np.reshape(statfem_problem.muy.vector, (-1,2))[:,1])
     plt.colorbar(label="Displacement posterior",pad=0.1)
-    plt.scatter(x_data[:,0], x_data[:,1], c = np.diag(Cuy), cmap="Greys_r")
+    plt.scatter(x_data[:,0], x_data[:,1], c = np.diag(statfem_problem.Cuy)[1::2], cmap="Greys_r")
     plt.colorbar(label="Covariance $C_{u|y}$ at y")
     plt.title("Posterior FEM solution and uncertainty")
 
 if makeplots:
     plt.figure()
-    plt.plot(x_data[:,0],muy2,'o-',markersize = 0, label = "u posterior scaled")
-    plt.fill_between(x_data[:,0],muy2+1.96*np.sqrt(np.diag(Cuy)), muy2-1.96*np.sqrt(np.diag(Cuy)), label = "u scaled 95 confidence", alpha = 0.5)
-    plt.plot(x_data[:,0],mu_z2,'o-',markersize = 2,label = "y from FEM (z+noise) posterior")
-    plt.fill_between(x_data[:,0],mu_z2+1.96*np.sqrt(np.diag(Cu_z2)), mu_z2-1.96*np.sqrt(np.diag(Cu_z2)), label = "y from FEM (z+noise) 95 confidence", alpha = 0.5)
-    plt.plot(x_data[:,0],y, '+', label = "data")
+    plt.plot(x_data[:,0],statfem_problem.muy2[:,1],'o-',markersize = 0, label = "u posterior scaled")
+    plt.fill_between(x_data[:,0],statfem_problem.muy2[:,1]+1.96*np.sqrt(np.diag(statfem_problem.Cuy)[1::2]), statfem_problem.muy2[:,1]-1.96*np.sqrt(np.diag(statfem_problem.Cuy)[1::2]), label = "u scaled 95 confidence", alpha = 0.5)
+    plt.plot(x_data[:,0],statfem_problem.mu_z2[:,1],'o-',markersize = 2,label = "y from FEM (z+noise) posterior")
+    plt.fill_between(x_data[:,0],statfem_problem.mu_z2[:,1]+1.96*np.sqrt(np.diag(statfem_problem.Cu_z2)[1::2]), statfem_problem.mu_z2[:,1]-1.96*np.sqrt(np.diag(statfem_problem.Cu_z2)[1::2]), label = "y from FEM (z+noise) 95 confidence", alpha = 0.5)
+    plt.plot(x_data[:,0],y[:,1], '+', label = "data")
     plt.title("Posterior solutions")
     plt.xlabel("x [m]")
     plt.ylabel("y")

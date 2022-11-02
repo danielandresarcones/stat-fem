@@ -90,7 +90,14 @@ class InterpolationMatrix(object):
 
         self.meshspace_vector = Function(self.function_space)
 
-        self.n_mesh_local = self.meshspace_vector.vector.local_size
+        try:
+            self.n_mesh_local = int(self.meshspace_vector.vector.local_size/self.function_space.num_sub_spaces)
+        except ZeroDivisionError:
+            self.n_mesh_local = self.meshspace_vector.vector.local_size
+            
+        self.dimension = self.function_space.num_sub_spaces
+        if self.dimension == 0:
+            self.dimension = 1
         self.n_mesh = self.meshspace_vector.vector.size
 
         nnz = len(self.function_space.mesh.geometry.x)
@@ -149,9 +156,9 @@ class InterpolationMatrix(object):
                 points = meshvals_local[nodes]
                 interp_coords = interpolate_cell(coords[i], points)
                 for (node, val) in zip(nodes, interp_coords):
-                    if node < self.n_mesh_local:
-                        for j in range(self.n_mesh_local.denominator):
-                            self.interp.setValue(imin + self.n_mesh_local.denominator*node + j, self.n_mesh_local.denominator*i + j, val)
+                    if node < self.n_mesh:
+                        for j in range(self.dimension):
+                            self.interp.setValue(imin + self.dimension*node + j, self.dimension*i + j, val)
 
         self.interp.assemble()
 

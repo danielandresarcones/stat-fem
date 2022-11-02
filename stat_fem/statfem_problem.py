@@ -55,14 +55,15 @@ class StatFEMProblem:
             self.ls = stat_fem.estimate_params_MAP(self.problem, self.G, self.obs_data, stabilise = self.parameters['stabilise'])
         elif self.parameters['inference_mode'] == 'MCMC':
             self.ls, self.samples = stat_fem.estimate_params_MCMC(self.problem, self.G, self.obs_data, stabilise = self.parameters['stabilise'])
-            if makeplots:
+            if self.makeplots:
                 figure, axes = plt.subplots(3)
                 figure.suptitle("MCMC 20000 samples")
                 names = [r"$\rho$",r"$\sigma_d$",r"$l_d$"]
                 p_names = [r"$p(\rho)$",r"$p(\sigma_d$)",r"p($l_d$)"]
-                ranges =  [[0,1.5],[0,0.3],[0,0.2]]
+                # ranges =  [[0,1.5],[0,0.3],[0,0.2]]
                 for i in range(3):
-                    axes[i].hist(np.exp(self.samples[:, i]), 100, range = ranges[i] ,color='k', histtype="step")
+                    # axes[i].hist(np.exp(self.samples[:, i]), 100, range = ranges[i] ,color='k', histtype="step")
+                    axes[i].hist(np.exp(self.samples[:, i]), 100, color='k', histtype="step")
                     axes[i].set(xlabel = names[i], ylabel = p_names[i])
                     axes[i].axvline(x=np.exp(self.ls.params[i]), c='b',linestyle = '-', label = "Estimate")
                     axes[i].axvline(x=np.exp(true_values[i]), c='r',linestyle = '--', label = "True")
@@ -80,15 +81,16 @@ class StatFEMProblem:
         # posterior FEM solution conditioned on the data
 
         # solve for posterior FEM solution conditioned on data
-        mu, Cu = self.ls.solve_prior()
+        self.mu, self.Cu = self.ls.solve_prior()
         # mu_f, Cu_f = self.ls.solve_prior_generating()
+        self.mu = self._reshape_to_data_obs(self.mu)
 
         # plot priors 
-        if makeplots:
+        if self.makeplots:
             if self.dim == 1:
                 plt.figure()
-                plt.plot(self.data_coords[:,0],mu,'o-',markersize = 2,label = "u")
-                plt.fill_between(self.data_coords[:,0],mu+1.96*np.diag(Cu), mu-1.96*np.diag(Cu), label = "u 95 confidence",alpha = 0.5)
+                plt.plot(self.data_coords[:,0],self.mu,'o-',markersize = 2,label = "u")
+                plt.fill_between(self.data_coords[:,0],self.mu+1.96*np.diag(self.Cu), self.mu-1.96*np.diag(self.Cu), label = "u 95 confidence",alpha = 0.5)
                 # plt.plot(x_data,z_mean, '+-', label = "True z")
                 # plt.fill_between(x_data[:,0],z_mean+1.96*np.sqrt(np.diag(z_cov)),z_mean-1.96*np.sqrt(np.diag(z_cov)), label = "True z 95 confidence", alpha = 0.5)
                 plt.plot(self.data_coords,self.data_values, '+', label = "data")
@@ -105,29 +107,32 @@ class StatFEMProblem:
                 plt.colorbar()
                 plt.title("Prior FEM solution and data")
             
-        muy = Function(self.V)
+        self.muy = Function(self.V)
 
         # solve_posterior computes the full solution on the FEM grid using a Firedrake function
         # the scale_mean option will ensure that the output is scaled to match
         # the data rather than the FEM soltuion
 
-        self.ls.solve_posterior(muy, scale_mean=True)
+        self.ls.solve_posterior(self.muy, scale_mean=True)
+        # self.muy = self._reshape_to_data_obs(self.muy)
 
         # covariance can only be computed for a select number of locations as covariance is a dense matrix
         # function returns the mean/covariance as numpy arrays, not Firedrake functions
 
-        muy2, Cuy = self.ls.solve_posterior_covariance(scale_mean=True)
-        mu_z2, Cu_z2 = self.ls.solve_posterior_real()
+        self.muy2, self.Cuy = self.ls.solve_posterior_covariance(scale_mean=True)
+        self.muy2 = self._reshape_to_data_obs(self.muy2)
+        self.mu_z2, self.Cu_z2 = self.ls.solve_posterior_real()
+        self.mu_z2 = self._reshape_to_data_obs(self.mu_z2)
 
         # visualize posterior FEM solution and uncertainty
 
-        if makeplots:
+        if self.makeplots:
             if self.dim == 1:
                 plt.figure()
-                plt.plot(self.data_coords[:,0],muy2,'o-',markersize = 0, label = "u posterior scaled")
-                plt.fill_between(self.data_coords[:,0],muy2+1.96*np.sqrt(np.diag(Cuy)), muy2-1.96*np.sqrt(np.diag(Cuy)), label = "u scaled 95 confidence", alpha = 0.5)
-                plt.plot(self.data_coords[:,0],mu_z2,'o-',markersize = 2,label = "y from FEM (z+noise) posterior")
-                plt.fill_between(self.data_coords[:,0],mu_z2+1.96*np.sqrt(np.diag(Cu_z2)), mu_z2-1.96*np.sqrt(np.diag(Cu_z2)), label = "y from FEM (z+noise) 95 confidence", alpha = 0.5)
+                plt.plot(self.data_coords[:,0],self.muy2,'o-',markersize = 0, label = "u posterior scaled")
+                plt.fill_between(self.data_coords[:,0],self.muy2+1.96*np.sqrt(np.diag(self.Cuy)), self.muy2-1.96*np.sqrt(np.diag(self.Cuy)), label = "u scaled 95 confidence", alpha = 0.5)
+                plt.plot(self.data_coords[:,0],self.mu_z2,'o-',markersize = 2,label = "y from FEM (z+noise) posterior")
+                plt.fill_between(self.data_coords[:,0],self.mu_z2+1.96*np.sqrt(np.diag(self.Cu_z2)), self.mu_z2-1.96*np.sqrt(np.diag(self.Cu_z2)), label = "y from FEM (z+noise) 95 confidence", alpha = 0.5)
                 plt.plot(self.data_coords,self.data_values, '+', label = "data")
                 plt.title("Posterior solutions")
                 plt.xlabel("x [m]")
@@ -138,9 +143,9 @@ class StatFEMProblem:
             if self.dim == 2:
                 plt.figure()
                 plt.tripcolor(self.experiment.mesh.geometry.x[:,0], self.experiment.mesh.geometry.x[:,1],
-                            muy.vector)
+                            self.muy.vector)
                 plt.colorbar()
-                plt.scatter(self.data_coords[:,0], self.data_coords[:,1], c = np.diag(Cuy), cmap="Greys_r")
+                plt.scatter(self.data_coords[:,0], self.data_coords[:,1], c = np.diag(self.Cuy), cmap="Greys_r")
                 plt.colorbar()
                 plt.title("Posterior FEM solution and uncertainty")
                 plt.show()
@@ -167,3 +172,7 @@ class StatFEMProblem:
         self.parameters['iterations'] = 2000
         self.parameters['walkers'] = 10
         self.parameters['stabilise'] = True
+
+    def _reshape_to_data_obs(self, array):
+
+        return np.reshape(array, self.data_values.shape)

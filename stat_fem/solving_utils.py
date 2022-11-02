@@ -53,7 +53,7 @@ def solve_forcing_covariance(G, ls, rhs):
 
     # turn off BC application temporarily
 
-    bcs = ls.bcs
+    # bcs = ls.bcs
     
     rhs_working = rhs.copy()
     x = Function(rhs_working.function_space).vector
@@ -64,7 +64,7 @@ def solve_forcing_covariance(G, ls, rhs):
 
     # turn BCs back on
 
-    ls.bcs = bcs
+    # ls.bcs = bcs
 
     return x_temp2.copy()
 
