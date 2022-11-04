@@ -143,7 +143,7 @@ class StatFEMProblem:
             if self.dim == 2:
                 plt.figure()
                 plt.tripcolor(self.experiment.mesh.geometry.x[:,0], self.experiment.mesh.geometry.x[:,1],
-                            self.muy.vector)
+                            self.muy.x.array)
                 plt.colorbar()
                 plt.scatter(self.data_coords[:,0], self.data_coords[:,1], c = np.diag(self.Cuy), cmap="Greys_r")
                 plt.colorbar()
