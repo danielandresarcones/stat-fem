@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from types import MethodType
 sys.path.append("/home/darcones/FenicsConcrete")
 import fenicsX_concrete
-from dolfinx.fem import Function
+from dolfinx.fem import Function, form
 
 try:
     import matplotlib.pyplot as plt
@@ -81,12 +81,12 @@ class StatFEMProblem:
         # posterior FEM solution conditioned on the data
 
         # solve for posterior FEM solution conditioned on data
-        self.mu, self.Cu = self.ls.solve_prior()
-        # mu_f, Cu_f = self.ls.solve_prior_generating()
-        self.mu = self._reshape_to_data_obs(self.mu)
 
         # plot priors 
         if self.makeplots:
+        self.mu, self.Cu = self.ls.solve_prior()
+        # mu_f, Cu_f = self.ls.solve_prior_generating()
+        self.mu = self._reshape_to_data_obs(self.mu)
             if self.dim == 1:
                 plt.figure()
                 plt.plot(self.data_coords[:,0],self.mu,'o-',markersize = 2,label = "u")
