@@ -9,6 +9,8 @@ from types import MethodType
 sys.path.append("/home/darcones/FenicsConcrete")
 import fenicsX_concrete
 from dolfinx.fem import Function, form
+from dolfinx.fem.petsc import assemble_matrix, assemble_vector, apply_lifting, set_bc
+from petsc4py import PETSc
 
 try:
     import matplotlib.pyplot as plt
@@ -51,6 +53,17 @@ class StatFEMProblem:
 
         true_values = np.array([self.parameters['true_rho'], self.parameters['true_sigma_eta'], self.parameters['true_l_eta']])
 
+        # assemble matrices if not present
+        if not hasattr(self.problem, 'A'):
+            self.problem.A = assemble_matrix(form(self.problem.a), bcs = self.problem.experiment.bcs)
+            self.problem.A.assemble()
+
+        if not hasattr(self.problem, 'b'):
+            self.problem.b = assemble_vector(form(self.problem.L))
+            apply_lifting(self.problem.b, [form(self.problem.a)], bcs=[self.problem.experiment.bcs])
+            self.problem.b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
+            set_bc(self.problem.b, self.problem.experiment.bcs)
+
         if self.parameters['inference_mode'] == 'MAP':
             self.ls = stat_fem.estimate_params_MAP(self.problem, self.G, self.obs_data, stabilise = self.parameters['stabilise'])
         elif self.parameters['inference_mode'] == 'MCMC':
@@ -84,9 +97,9 @@ class StatFEMProblem:
 
         # plot priors 
         if self.makeplots:
-        self.mu, self.Cu = self.ls.solve_prior()
-        # mu_f, Cu_f = self.ls.solve_prior_generating()
-        self.mu = self._reshape_to_data_obs(self.mu)
+            self.mu, self.Cu = self.ls.solve_prior()
+            # mu_f, Cu_f = self.ls.solve_prior_generating()
+            self.mu = self._reshape_to_data_obs(self.mu)
             if self.dim == 1:
                 plt.figure()
                 plt.plot(self.data_coords[:,0],self.mu,'o-',markersize = 2,label = "u")
@@ -119,7 +132,7 @@ class StatFEMProblem:
         # covariance can only be computed for a select number of locations as covariance is a dense matrix
         # function returns the mean/covariance as numpy arrays, not Firedrake functions
 
-        self.muy2, self.Cuy = self.ls.solve_posterior_covariance(scale_mean=True)
+        self.muy2, self.Cuy, self.mu_mesh= self.ls.solve_posterior_covariance(scale_mean=True)
         self.muy2 = self._reshape_to_data_obs(self.muy2)
         self.mu_z2, self.Cu_z2 = self.ls.solve_posterior_real()
         self.mu_z2 = self._reshape_to_data_obs(self.mu_z2)
@@ -174,5 +187,5 @@ class StatFEMProblem:
         self.parameters['stabilise'] = True
 
     def _reshape_to_data_obs(self, array):
-
-        return np.reshape(array, self.data_values.shape)
+        
+        return np.reshape(array, np.array(self.data_values).shape)

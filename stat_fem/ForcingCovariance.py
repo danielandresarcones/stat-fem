@@ -146,13 +146,13 @@ class ForcingCovariance(object):
 
         G_dict = {}
         nnz = 0
-        try:
-            int_basis = self._integrate_basis_functions(self.function_space.sub(0)) #Only works with first order polynomials
-        except AssertionError:                                                      #TODO: THIS IS EXTREMELY DANGEROUS!!!!
-            int_basis = self._integrate_basis_functions(self.function_space)
         int_basis_list = []
         for dim in range(len(self.sigma)):
-            int_basis_list.append([int_basis[i] for i in range(dim,len(int_basis),len(self.sigma))])
+            try:
+                int_basis = self._integrate_basis_functions(self.function_space.sub(dim)) #Only works with first order polynomials
+            except AssertionError:                                                      #TODO: THIS IS EXTREMELY DANGEROUS!!!!
+                int_basis = self._integrate_basis_functions(self.function_space)
+                int_basis_list.append([int_basis[i] for i in range(dim,len(int_basis),len(self.sigma))])
         mesh = self.function_space.mesh
         if isinstance(self.function_space.ufl_element(), VectorElement):
             W = self.function_space
