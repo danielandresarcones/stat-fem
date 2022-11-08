@@ -372,7 +372,9 @@ class LinearSolver(object):
             muy = np.zeros(0)
             Cuy = np.zeros((0,0))
 
-        return scalefact*muy, Cuy
+        muy_mesh = self.im.interp_data_to_mesh(muy*scalefact)
+
+        return scalefact*muy, Cuy, muy_mesh
 
     def solve_posterior_real(self):
         r"""
@@ -390,7 +392,7 @@ class LinearSolver(object):
 
         # create interpolation matrix if not cached
 
-        muy, Cuy = self.solve_posterior_covariance()
+        muy, Cuy, mu_mesh = self.solve_posterior_covariance()
 
         if self.params is None:
             raise ValueError("must set parameter values to solve posterior of real process")

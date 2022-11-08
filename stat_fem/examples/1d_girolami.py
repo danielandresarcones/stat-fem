@@ -65,7 +65,7 @@ class ProblemPoisson:
         self.u = self.lproblem.solve()
         return self.u
 
-nx = 33
+nx = 66
 force = np.pi**2/5.0
 
 experiment = ExperimentPoisson1D(nx)
@@ -118,5 +118,18 @@ y = (z + np.random.normal(scale = sigma_y, size = ndata))
 # visualize the prior FEM solution and the synthetic data
 
 
+
 statfem_problem = stat_fem.StatFEMProblem(problem, experiment, x_data, y, parameters=statfem_param)
 statfem_problem.solve()
+
+# plt.figure()
+# plt.plot(x_data[:,0],statfem_problem.mu,'o-',markersize = 2,label = "u")
+# plt.fill_between(x_data[:,0],statfem_problem.mu+1.96*np.diag(statfem_problem.Cu), statfem_problem.mu-1.96*np.diag(statfem_problem.Cu), label = "u 95 confidence",alpha = 0.5)
+# plt.plot(x_data,z_mean, '+-', label = "True z")
+# plt.fill_between(x_data[:,0],z_mean+1.96*np.sqrt(np.diag(z_cov)),z_mean-1.96*np.sqrt(np.diag(z_cov)), label = "True z 95 confidence", alpha = 0.5)
+# plt.plot(x_data,y, '+', label = "data")
+# plt.xlabel("x [m]")
+# plt.ylabel("y")
+# plt.legend()
+# plt.title("Prior solutions")
+# plt.show()
