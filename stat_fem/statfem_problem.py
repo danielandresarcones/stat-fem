@@ -4,6 +4,8 @@ import sys
 sys.path.append("/home/darcones/firedrake/stat-fem") #TODO: Adjust for relative pathing
 import stat_fem
 import matplotlib.pyplot as plt
+from scipy.linalg import cho_factor, cho_solve
+from scipy.linalg import LinAlgError
 # from firedrake import *
 from types import MethodType
 sys.path.append("/home/darcones/FenicsConcrete")
@@ -11,6 +13,7 @@ import fenicsX_concrete
 from dolfinx.fem import Function, form
 from dolfinx.fem.petsc import assemble_matrix, assemble_vector, apply_lifting, set_bc
 from petsc4py import PETSc
+from mpi4py import MPI
 
 try:
     import matplotlib.pyplot as plt
@@ -27,6 +30,7 @@ class StatFEMProblem:
             for key,value in parameters.items():
                 self.parameters[key] = value
 
+        self.solved = False
         self.problem = problem
         self.experiment = experiment
         self.data_coords = data_coords
@@ -41,6 +45,8 @@ class StatFEMProblem:
 
         self.G = stat_fem.ForcingCovariance(self.V, self.parameters['sigma_f'], self.parameters['l_f'])
         self.G.assemble()
+
+        self.lsolver = PETSc.KSP().create(MPI.COMM_WORLD)
 
         # combine data into an observational data object using known locations, observations,
         # and known statistical errors
@@ -163,6 +169,27 @@ class StatFEMProblem:
                 plt.title("Posterior FEM solution and uncertainty")
                 plt.show()
 
+        # Mark as solved
+
+        self.solved = True
+
+    def solve_lp(self):
+
+        self.problem.A = assemble_matrix(form(self.problem.a), bcs = self.problem.experiment.bcs)
+        self.problem.A.assemble()
+
+        self.problem.b = assemble_vector(form(self.problem.L))
+        apply_lifting(self.problem.b, [form(self.problem.a)], bcs=[self.problem.experiment.bcs])
+        self.problem.b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
+        set_bc(self.problem.b, self.problem.experiment.bcs)
+
+        # x = Function(self.G.function_space).vector
+        x = self.problem.b.copy()
+        self.lsolver.setOperators(self.problem.A)
+        self.lsolver.solve(self.problem.b, x)
+        self.mu = self.ls.im.interp_mesh_to_data(x)
+
+
     def _get_default_parameters(self):
 
         self.parameters = dict()
@@ -189,3 +216,37 @@ class StatFEMProblem:
     def _reshape_to_data_obs(self, array):
         
         return np.reshape(array, np.array(self.data_values).shape)
+
+    def loglikelihood(self, priors = []):
+
+        if not self.solved:
+            self.solve()
+
+        self.solve_lp()
+
+        rho, sigma_d, l_d = self.ls.parameters
+
+        if MPI.COMM_WORLD.rank == 0:
+            KCu = self.obs_data.calc_K_plus_sigma(self.ls.parameters[1:])
+            try:
+                L = cho_factor(KCu)
+            except LinAlgError:
+                raise LinAlgError("Error attempting to factorize the covariance matrix " +
+                                  "in model_loglikelihood")
+            invKCudata = cho_solve(L, self.obs_data.get_data().reshape((-1,)) - rho*self.mu)
+            log_posterior = 0.5*(self.obs_data.get_n_obs()*np.log(2.*np.pi) +
+                                 2.*np.sum(np.log(np.diag(L[0]))) +
+                                 np.dot(self.obs_data.get_data().reshape((-1,)) - rho*self.mu, invKCudata))
+            for i in range(len(priors)):
+                if not priors[i] is None:
+                    log_posterior -= priors[i].logp(self.params[i])
+        else:
+            log_posterior = None
+
+        log_posterior = MPI.COMM_WORLD.bcast(log_posterior, root=0)
+
+        assert not log_posterior is None, "error in broadcasting the log likelihood"
+
+        MPI.COMM_WORLD.barrier()
+
+        return log_posterior
