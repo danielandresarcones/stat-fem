@@ -7,7 +7,7 @@ from types import MethodType
 sys.path.append("/home/darcones/FenicsConcrete")
 import matplotlib.pyplot as plt
 import fenicsX_concrete
-from dolfinx.fem import Function
+from dolfinx.fem import Function, Constant
 from dolfinx import io
 
 try:
@@ -118,14 +118,16 @@ if makeplots:
 # A = assemble(problem.a, bcs = experiment.bcs)
 
 # Simplify field to be deterministic
-def simple_lambda_(self): #Lame's constant
-    return p.E * p.nu/((1 + p.E)*(1-2*p.nu))
+def simple_lambda_(mesh, E, nu): #Lame's constant
+    return Constant(mesh, float(E * nu/((1 + E)*(1-2*nu))))
 
-def simple_mu(self):     #Lame's constant
-    return p.E/(2*(1+p.nu))
+def simple_mu(mesh, E, nu):     #Lame's constant
+    return Constant(mesh, float(E/(2*(1+nu))))
 
-problem.lambda_ = MethodType(simple_lambda_, problem)
-problem.mu = MethodType(simple_mu, problem)
+# problem.lambda_ = MethodType(simple_lambda_, problem)
+# problem.mu = MethodType(simple_mu, problem)
+problem.lambda_ = simple_lambda_(experiment.mesh, p.E+100, p.nu)
+problem.mu = simple_mu(experiment.mesh, p.E+100, p.nu)
 
 problem.define_variational_problem()
 problem.solve()

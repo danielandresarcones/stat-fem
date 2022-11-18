@@ -7,7 +7,7 @@ from types import MethodType
 sys.path.append("/home/darcones/FenicsConcrete")
 import matplotlib.pyplot as plt
 import fenicsX_concrete
-from dolfinx.fem import Function
+from dolfinx.fem import Function, Constant
 from dolfinx import io
 
 # local imports (problem definition)
@@ -33,11 +33,11 @@ try:
 except ImportError:
     makeplots = False
 
-def simple_lambda_(E, nu): #Lame's constant
-    return lambda x: E * nu/((1 + E)*(1-2*nu))
+def simple_lambda_(mesh, E, nu): #Lame's constant
+    return Constant(mesh, float(E * nu/((1 + E)*(1-2*nu))))
 
-def simple_mu(E, nu):     #Lame's constant
-    return lambda x: E/(2*(1+nu))
+def simple_mu(mesh, E, nu):     #Lame's constant
+    return Constant(mesh, float(E/(2*(1+nu))))
 
 class StatFEMInferenceModel(ForwardModelBase):
 
@@ -49,22 +49,50 @@ class StatFEMInferenceModel(ForwardModelBase):
     def interface(self):
         self.parameters = ["E", "nu"]
         self.input_sensors = []
+        # self.output_sensors = Sensor("y", std_model="cov")
         self.output_sensors = Sensor("y", std_model="model_variance")
 
     def response(self, inp: dict) -> dict:
-        E = inp["E"]
+        E_ = inp["E"]
         nu = inp["nu"]
 
         # Update parameters
-        self.statfem_problem.problem.lambda_ = MethodType(simple_lambda_(E, nu), problem )
-        self.statfem_problem.problem.mu = MethodType(simple_mu(E, nu), problem)
+        # self.statfem_problem.problem.lambda_ = MethodType(simple_lambda_(self.statfem_problem.experiment.mesh, E, nu), problem )
+        # self.statfem_problem.problem.mu = MethodType(simple_mu(self.statfem_problem.experiment.mesh, E, nu), problem)
+        self.statfem_problem.problem.lambda_ = simple_lambda_(self.statfem_problem.experiment.mesh, E_, nu)
+        self.statfem_problem.problem.mu = simple_mu(self.statfem_problem.experiment.mesh, E_, nu)
 
         # Update formulation and solve linear problem
         self.statfem_problem.problem.define_variational_problem()
-        self.statfem_problem.solve_lp()
-   
-        return{"y": np.exp(self.statfem_problem.ls.params[0])*self.statfem_problem.mu}
+        # self.statfem_problem.solve_lp()
+        displacements = self.statfem_problem.problem.solve().vector
+        
+        # Interpolate to observation points
+        y = np.exp(self.statfem_problem.ls.params[0]) * self.statfem_problem.ls.im.interp_mesh_to_data(displacements)
 
+        # return{"y": np.exp(self.statfem_problem.ls.params[0])*self.statfem_problem.mu}
+        return{"y": y}
+
+def simple_setup(p, sensors):
+    parameters = fenicsX_concrete.Parameters()  # using the current default values
+
+    #parameters['log_level'] = 'WARNING'
+    parameters['bc_setting'] = 'free'
+    parameters['mesh_density'] = 10
+
+    parameters = parameters + p
+
+    experiment = fenicsX_concrete.concreteSlabExperiment(parameters)         # Specifies the domain, discretises it and apply Dirichlet BCs
+
+    problem = fenicsX_concrete.LinearElasticity(experiment, parameters)      # Specifies the material law and weak forms.
+    #print(help(fenics_concrete.LinearElasticity))
+
+    for sensor in sensors:
+        problem.add_sensor(sensor)
+
+    problem.solve()
+
+    return experiment, problem
 
 if __name__ == "__main__":
     # Set up base FEM, which solves Poisson's equation on a square mesh
@@ -73,31 +101,9 @@ if __name__ == "__main__":
     nx = 33
     # Scaled variable
 
-
-    def simple_setup(p, sensors):
-        parameters = fenicsX_concrete.Parameters()  # using the current default values
-
-        #parameters['log_level'] = 'WARNING'
-        parameters['bc_setting'] = 'free'
-        parameters['mesh_density'] = 10
-
-        parameters = parameters + p
-
-        experiment = fenicsX_concrete.concreteSlabExperiment(parameters)         # Specifies the domain, discretises it and apply Dirichlet BCs
-
-        problem = fenicsX_concrete.LinearElasticity(experiment, parameters)      # Specifies the material law and weak forms.
-        #print(help(fenics_concrete.LinearElasticity))
-
-        for sensor in sensors:
-            problem.add_sensor(sensor)
-
-        problem.solve()
-
-        return experiment, problem
-
     p = fenicsX_concrete.Parameters()  # using the current default values
-    p['E'] = 160
-    p['nu'] = 0.3
+    p['E'] = 100
+    p['nu'] = 0.2
     p['length'] = 1
     p['breadth'] = 0.2
     p['num_elements_length'] = 20
@@ -133,7 +139,7 @@ if __name__ == "__main__":
     #print(sensor.name)
     experiment, problem = simple_setup(p, sensors)
 
-    y = [sensor.data[-1] for sensor_name,sensor in problem.sensors.items()]
+    y_sensor = [sensor.data[-1] for sensor_name,sensor in problem.sensors.items()]
 
     if makeplots:
 
@@ -156,23 +162,24 @@ if __name__ == "__main__":
     # Simplify field to be deterministic
     
 
-    problem.lambda_ = MethodType(simple_lambda_(p.E, p.nu), problem )
-    problem.mu = MethodType(simple_mu(p.E, p.nu), problem )
+    # problem.lambda_ = MethodType(simple_lambda_(experiment.mesh, p.E, p.nu), problem )
+    # problem.mu = MethodType(simple_mu(experiment.mesh, p.E, p.nu), problem )
+    problem.lambda_ = simple_lambda_(experiment.mesh, p.E+100, p.nu)
+    problem.mu = simple_mu(experiment.mesh, p.E+100, p.nu)
 
-    problem.define_variational_problem()
+    problem.define_weakform_problem()
     problem.solve()
     y_simple = [sensor.data[-1] for sensor_name,sensor in problem.sensors.items()]
 
 
+    statfem_problem = stat_fem.StatFEMProblem(problem, experiment, x_data, y_sensor, parameters=statfem_param, makeplots = False)
+    statfem_problem.solve()
 
     with io.XDMFFile(experiment.mesh.comm, "deformation_stochastic_slab.xdmf", "w") as xdmf:
         xdmf.write_mesh(experiment.mesh)
         problem.displacement.name = "Deformation prior"
         xdmf.write_function(problem.displacement)
         
-        statfem_problem = stat_fem.StatFEMProblem(problem, experiment, x_data, y, parameters=statfem_param, makeplots = False)
-        statfem_problem.solve()
-
         statfem_problem.mu_mesh.name = "Deformation posterior"
         xdmf.write_function(statfem_problem.mu_mesh)
 
@@ -186,17 +193,18 @@ if __name__ == "__main__":
         tex="$E$",
         info="Young's modulus",
         # domain="[10, 1000)",
-        # prior=LogNormal(mean=float(np.log(90)), std=0.5),
-        prior=Normal(mean=120, std=15),
+        prior=LogNormal(mean=float(np.log(90)), std=0.5),
+        # prior=Normal(mean=180, std=15),
+        # prior = Uniform(low = 80, high= 200),
     )
     inverse_problem.add_parameter(
         "nu",
         tex="$\\nu$",
         info="Poisson's ration",
-        # prior=LogNormal(mean=float(np.log(0.18)), std=0.05),
-        # domain = "(0, 0.5)",
+        prior=LogNormal(mean=float(np.log(0.18)), std=0.05),
+        domain = "(0, 0.5)",
         # prior=Normal(mean=0.05, std=0.2),
-        value = 0.3,
+        # value = 0.2,
     )
 
     post_cov = statfem_problem.ls.data.calc_K_plus_sigma(statfem_problem.ls.params[1:])
@@ -204,6 +212,7 @@ if __name__ == "__main__":
     inverse_problem.add_parameter(
         "model_variance",
         value = np.diag(post_cov),
+        # value = 4.6e-6,
         tex=r"Diagonal $C_d+C_e$",
         info="Standard deviation from the Gaussian model",
     )
@@ -217,7 +226,7 @@ if __name__ == "__main__":
 
     inverse_problem.add_experiment(
         name="TestSeries_1",
-        sensor_data={"y": np.reshape(y, (-1,))},
+        sensor_data={"y": np.reshape(y_sensor, (-1,))},
     )
 
     # forward model
@@ -227,12 +236,13 @@ if __name__ == "__main__":
     # likelihood model
     inverse_problem.add_likelihood_model(
         GaussianLikelihoodModel(experiment_name="TestSeries_1", model_error="additive", correlation=PrescribedCovModel(cov = 'cov'))
+        # GaussianLikelihoodModel(experiment_name="TestSeries_1", model_error="additive")
     )
 
     inverse_problem.info(print_header=True)
 
     emcee_solver = EmceeSolver(inverse_problem, show_progress=True)
-    inference_data = emcee_solver.run(n_steps=60, n_initial_steps=10,n_walkers = 10)
+    inference_data = emcee_solver.run(n_steps=60, n_initial_steps=20,n_walkers = 10)
 
     true_values = { 'E': 100, 'nu':0.2}
     pair_plot_array = create_pair_plot(
@@ -260,8 +270,12 @@ if __name__ == "__main__":
     # Update parameters
     # statfem_problem.problem.lambda_ = MethodType(simple_lambda_(emcee_solver.summary['mean']['E'], emcee_solver.summary['mean']['nu']), problem )
     # statfem_problem.problem.mu = MethodType(simple_mu(emcee_solver.summary['mean']['E'], emcee_solver.summary['mean']['nu']), problem)
-    statfem_problem.problem.lambda_ = MethodType(simple_lambda_(emcee_solver.summary['mean']['E'], p["nu"]), problem )
-    statfem_problem.problem.mu = MethodType(simple_mu(emcee_solver.summary['mean']['E'], p["nu"]), problem)
+    # statfem_problem.problem.lambda_ = MethodType(simple_lambda_(emcee_solver.summary['mean']['E'], p["nu"]), problem )
+    # statfem_problem.problem.mu = MethodType(simple_mu(emcee_solver.summary['mean']['E'], p["nu"]), problem)
+    # statfem_problem.problem.lambda_ = simple_lambda_(experiment.mesh, emcee_solver.summary['mean']['E'], p["nu"])
+    # statfem_problem.problem.mu = simple_mu(experiment.mesh, emcee_solver.summary['mean']['E'], p["nu"])
+    statfem_problem.problem.lambda_ = simple_lambda_(experiment.mesh, emcee_solver.summary['mean']['E'], emcee_solver.summary['mean']['nu'])
+    statfem_problem.problem.mu = simple_mu(experiment.mesh, emcee_solver.summary['mean']['E'], emcee_solver.summary['mean']['nu'])
 
     # Update formulation and solve linear problem
     statfem_problem.problem.define_variational_problem()
@@ -271,8 +285,8 @@ if __name__ == "__main__":
     plt.plot(statfem_problem.muy2[:,1], 'b-', label = "u|y")
     plt.plot(statfem_problem.muy2[:,1]+1.96*np.diag(statfem_problem.Cuy)[1::2], 'b-', label = "u+3sigma",alpha = 0.5)
     plt.plot(statfem_problem.muy2[:,1]-1.96*np.diag(statfem_problem.Cuy)[1::2], 'b-', label = "u-3sigma",alpha = 0.5)
-    plt.plot(statfem_problem.mu[1::2],'g-', label = "u updated parameters")
-    plt.plot(np.array(y)[:,1], 'ro',  markersize = 2, label = "True y")
+    plt.plot(np.exp(statfem_problem.ls.params[0]) * statfem_problem.mu[1::2],'g-', label = "u updated parameters")
+    plt.plot(np.array(y_sensor)[:,1], 'ro',  markersize = 2, label = "True y")
     plt.plot(np.array(y_simple)[:,1], 'k+', label = "Simple y")
     plt.ylabel("Displacement [m]")
     plt.xlabel("Data point")
@@ -284,8 +298,8 @@ if __name__ == "__main__":
     plt.plot(statfem_problem.muy2[:,0], 'b-', label = "u|y")
     plt.plot(statfem_problem.muy2[:,0]+1.96*np.diag(statfem_problem.Cuy)[::2], 'b-', label = "u+3sigma",alpha = 0.5)
     plt.plot(statfem_problem.muy2[:,0]-1.96*np.diag(statfem_problem.Cuy)[::2], 'b-', label = "u-3sigma",alpha = 0.5)
-    plt.plot(statfem_problem.mu[::2],'g-', label = "u updated parameters")
-    plt.plot(np.array(y)[:,0], 'ro', markersize = 2, label = "y")
+    plt.plot(np.exp(statfem_problem.ls.params[0]) * statfem_problem.mu[::2],'g-', label = "u updated parameters")
+    plt.plot(np.array(y_sensor)[:,0], 'ro', markersize = 2, label = "y")
     plt.plot(np.array(y_simple)[:,0], 'k+', label = "Simple y")
     plt.title('Posterior horizontal displacement at sensors')
     plt.ylabel("Displacement [m]")
