@@ -291,8 +291,8 @@ if __name__ == "__main__":
     plt.ylabel("Displacement [m]")
     plt.xlabel("Data point")
     plt.title('Posterior vertical displacement at sensors')
-    # plt.savefig("/home/darcones/Desktop/Figures/statFEM/GRF/posterior_vertical_at_sensors")
     plt.legend()
+    # plt.savefig("/home/darcones/Desktop/Figures/statFEM/GRF/posterior_vertical_at_sensors")
 
     plt.figure()
     plt.plot(statfem_problem.muy2[:,0], 'b-', label = "u|y")
