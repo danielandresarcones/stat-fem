@@ -34,10 +34,12 @@ except ImportError:
     makeplots = False
 
 def simple_lambda_(mesh, E, nu): #Lame's constant
-    return Constant(mesh, float(E * nu/((1 + E)*(1-2*nu))))
+    # return Constant(mesh, float(E * nu/((1 + E)*(1-2*nu))))
+    return float(E * nu/((1 + E)*(1-2*nu)))
 
 def simple_mu(mesh, E, nu):     #Lame's constant
-    return Constant(mesh, float(E/(2*(1+nu))))
+    # return Constant(mesh, float(E/(2*(1+nu))))
+    return float(E/(2*(1+nu)))
 
 class StatFEMInferenceModel(ForwardModelBase):
 
@@ -59,8 +61,8 @@ class StatFEMInferenceModel(ForwardModelBase):
         # Update parameters
         # self.statfem_problem.problem.lambda_ = MethodType(simple_lambda_(self.statfem_problem.experiment.mesh, E, nu), problem )
         # self.statfem_problem.problem.mu = MethodType(simple_mu(self.statfem_problem.experiment.mesh, E, nu), problem)
-        self.statfem_problem.problem.lambda_ = simple_lambda_(self.statfem_problem.experiment.mesh, E_, nu)
-        self.statfem_problem.problem.mu = simple_mu(self.statfem_problem.experiment.mesh, E_, nu)
+        self.statfem_problem.problem.lambda_.value = simple_lambda_(self.statfem_problem.experiment.mesh, E_, nu)
+        self.statfem_problem.problem.mu.value = simple_mu(self.statfem_problem.experiment.mesh, E_, nu)
 
         # Update formulation and solve linear problem
         self.statfem_problem.problem.define_variational_problem()
@@ -164,8 +166,8 @@ if __name__ == "__main__":
 
     # problem.lambda_ = MethodType(simple_lambda_(experiment.mesh, p.E, p.nu), problem )
     # problem.mu = MethodType(simple_mu(experiment.mesh, p.E, p.nu), problem )
-    problem.lambda_ = simple_lambda_(experiment.mesh, p.E+100, p.nu)
-    problem.mu = simple_mu(experiment.mesh, p.E+100, p.nu)
+    problem.lambda_ = Constant(experiment.mesh, simple_lambda_(experiment.mesh, p.E+100, p.nu))
+    problem.mu = Constant(experiment.mesh,simple_mu(experiment.mesh, p.E+100, p.nu))
 
     problem.define_weakform_problem()
     problem.solve()
